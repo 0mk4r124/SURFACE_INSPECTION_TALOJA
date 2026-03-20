@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ANODE TRACKING
+Version=1.0
+Icon=/home/insightzz/insightzz/ANODE_TRACKING_LAPANGA/SERVICE_MANAGER/images.jpeg
+Path=/home/insightzz/insightzz/ANODE_TRACKING_LAPANGA/
+Exec=/usr/bin/python3 /home/insightzz/insightzz/ANODE_TRACKING_LAPANGA/SERVICE_MANAGER/MANAGE.py
+Terminal=false
+Type=Application
