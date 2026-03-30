@@ -125,6 +125,7 @@ def process_capture(flir, mq_obj, logger):
     count = 0
     bunch_num = f"{datetime.now():%Y%m%d_%H%M%S}"
     curr_time = datetime.now()
+    # datewise = f"{datetime.now():%Y_%m_%d}"
 
     reciever = MQTT("capture_monitor")
     reciever.subscribe("taloja/client/capture")
@@ -159,7 +160,7 @@ def process_capture(flir, mq_obj, logger):
             if not save: time.sleep(2)
             for cam_serial, config in CAMERA_CONFIGS.items():
 
-                save_path = os.path.join(TEMP_IMAGE_PATH, LOCATION, bunch_num, cam_serial)
+                save_path = os.path.join(TEMP_IMAGE_PATH, LOCATION ,bunch_num, cam_serial)
                 fname = f"{bunch_num}_{cam_serial}_{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"
                 comp_path = os.path.join(save_path, fname)
                 cam = cam_objects[cam_serial]
@@ -286,7 +287,7 @@ def main():
                 print("Restarting capture in 5 seconds...")
                 logger.warning("Restarting capture in 5 seconds...")
                 time.sleep(5)
-                continue
+            continue
 
         except Exception as e:
             print(f"Outer loop {e}")

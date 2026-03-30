@@ -10,9 +10,61 @@ from logging.handlers import TimedRotatingFileHandler
 from DEPENDANT.MQTT import MQTT
 
 BASE_DIR = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/"
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "root",
+    "passwd": "insightzz@123",
+    "db": "SURFACE_INSPECTION_TALOJA"
+}
+# Persistent Roll Counter
+COUNTER_FILE = os.path.join(BASE_DIR, "SCRIPTS", "roll_counter.txt")
+
 plclogger = None
-dbConnection = None
 manual_trigger = False
+
+def get_next_roll_id():
+    today = datetime.now().strftime("%Y%m%d")
+    counter = 1
+    
+    if os.path.exists(COUNTER_FILE):
+        try:
+            with open(COUNTER_FILE, "r") as f:
+                line = f.read().strip()
+                last_date, last_count = line.split(",")
+                if last_date == today:
+                    counter = int(last_count) + 1
+        except Exception:
+            pass
+                
+    try:
+        with open(COUNTER_FILE, "w") as f:
+            f.write(f"{today},{counter}")
+    except Exception as e:
+        if plclogger: plclogger.error(f"Failed to write counter file: {e}")
+        
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"Roll_{now_str}_{counter:03d}"
+
+def log_mill_event(roll_id, event_type):
+    # event_type: 'start' or 'stop'
+    db = None
+    try:
+        db = pymysql.connect(**DB_CONFIG)
+        cur = db.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        if event_type == 'start':
+            query = "INSERT INTO mill_runs (roll_id, mill_start_time, CREATED_AT) VALUES (%s, %s, %s)"
+            cur.execute(query, (roll_id, now, now))
+        else:
+            query = "UPDATE mill_runs SET mill_stop_time = %s WHERE roll_id = %s AND mill_stop_time IS NULL ORDER BY id DESC LIMIT 1"
+            cur.execute(query, (now, roll_id))
+            
+        db.commit()
+    except Exception as e:
+        if plclogger: plclogger.error(f"Database logging failed: {e}")
+    finally:
+        if db: db.close()
           
 def initializeLogger():
      global plclogger
@@ -89,38 +141,104 @@ def main():
                plcobj = PLCCOMMINCATION()
                plcobj.init()
 
+               last_mill_run = 0
+               current_roll_id = None
+
                while True:
                     try:
-                         trigger = plcobj.read_bit(0, plcobj.FRAME_CAPTURE_SIGNAL)
+                         # Read status and diameter
+                         # DataToDeltaPLC[10]: bit 0 -> mill_is_run, bit 1 -> ironing_raised
+                         # DataToDeltaPLC[0]: diameter value
+
+
+
+
+                         # Read bit word
+                         bit_rec = plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[10]")
+                         status_raw = int(bit_rec.value)
+
+                         # Extract bits
+                         mill_is_run = (status_raw >> 0) & 1
+                         ironing_raised = (status_raw >> 1) & 1
+
+                         print("mill_is_run", mill_is_run)
+                         print("ironing_raised",ironing_raised)
+
+                         
+                         # status_raw = int(plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[10]").value)
+                         # mill_is_run = (status_raw >> 0) & 1
+                         # ironing_raised = (status_raw >> 1) & 1
+                         
+                         diameter = int(plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[0]").value)
+
+                         # 1. Mill Run Time Tracking
+                         if mill_is_run == 1 and last_mill_run == 0:
+                              print(f"MILL STARTED")
+                              # We'll generate the Roll ID when capture actually starts, 
+                              # but we log the mill start event now.
+                              log_mill_event("SESSION_START", "start") 
+                         
+                         if mill_is_run == 0 and last_mill_run == 1:
+                              print(f"MILL STOPPED")
+                              log_mill_event(current_roll_id if current_roll_id else "SESSION_START", "stop")
+                              if start_capture:
+                                   print(f"ENDED FRAME CAPTURE (Mill Stop)")
+                                   start_capture = False
+                                   bunch = "INACTIVE"
+                                   current_roll_id = None
+
+                         # 2. PLC Signal-Based Trigger & Frame Capture
+                         # Start condition: mill_is_run=1, ironing_raised=0 (raw=1)
+                         if mill_is_run == 1 and ironing_raised == 0:
+                              if not start_capture:
+                                   print(f"STARTED FRAME CAPTURE - PLC Signal (raw=1)")
+                                   start_capture = True
+                                   current_roll_id = get_next_roll_id()
+                                   bunch = current_roll_id
+                                   log_mill_event(current_roll_id, "start")
+
+                         # Stop condition: mill_is_run=0, ironing_raised=1 (raw=2)
+                         elif mill_is_run == 0 and ironing_raised == 1:
+                              if start_capture:
+                                   print(f"ENDED FRAME CAPTURE - PLC Signal (raw=2)")
+                                   log_mill_event(current_roll_id, "stop")
+                                   start_capture = False
+                                   bunch = "INACTIVE"
+                                   current_roll_id = None
+                         
+                         # else:
+                         #      # If mill stops outside of the specific (0,1) state, ensure capture stops
+                         #      if not mill_is_run and start_capture:
+                         #           print(f"ENDED FRAME CAPTURE - Mill Stop")
+                         #           log_mill_event(current_roll_id, "stop")
+                         #           start_capture = False
+                         #           bunch = "INACTIVE"
+                         #           current_roll_id = None
+
+                         # MQTT Updates
                          writer.publish( f"taloja/client/write",
                               {
                                    "loc": "client",
-                                   "value": trigger
+                                   "value": diameter
                               }
                          )
-                         print(f"Trigger for Delta ----{datetime.now()}------{trigger}--------")
-
-                         if (trigger>585) and (last_trigger<trigger):
-                              # start capture
-                              print(f"STARTED FRAME CAPTURE")
-                              if not start_capture:
-                                   start_capture = True
-                                   bunch = f"{datetime.now():%Y%m%d_%H%M%S}"
-
-                         if last_trigger>trigger:
-                              # stop capture
-                              print(f"ENDED FRAME CAPTURE")
-                              start_capture = False
-                              bunch = "INACTIVE"
-
+                         
                          writer.publish( f"taloja/client/capture",
                               {
                                    "loc": "client",
                                    "value": bunch
                               }
                          )
-                         last_trigger = trigger
-                    except: plclogger.error(f"{traceback.format_exc()}")
+
+                         if mill_is_run or diameter > 0:
+                              print(f"PLC ----{datetime.now()}------diam={diameter}, mill={mill_is_run}, capture={bunch}--------")
+
+                         last_trigger = diameter
+                         last_mill_run = mill_is_run
+
+                    except Exception:
+                         plclogger.error(f"{traceback.format_exc()}")
+                         time.sleep(1) # Wait a bit on error
 
                     time.sleep(0.1)
      except Exception as e:

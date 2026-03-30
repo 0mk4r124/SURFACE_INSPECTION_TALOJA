@@ -1,0 +1,272 @@
+/* Custom global styles */
+body { overflow: hidden; /* removes vertical + horizontal scrollbar */ }
+
+body, table, input, button, select, textarea {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    font-size: 0.9rem;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    margin: 0.2rem 0;
+}
+
+.table, .form-label, .fw-bold, .text-muted {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+}
+
+.card-header {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    font-size: 0.95rem;
+}
+
+body {
+    overflow: hidden; /* Prevent global scroll */
+}
+
+/* Camera preview box */
+.video-box {
+    background: #f8f9fa;
+    border: 1px dashed #ccc;
+    border-radius: 6px;
+    height: 27vh; /* converted from 220px to vh */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+}
+
+.video-box img,
+.video-box video {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain; /* contain keeps full image inside box */
+    border-radius: 4px;
+}
+
+/* Camera cards equal height */
+.camera-card {
+    height: 100%;
+}
+
+/* Camera grid spacing */
+.camera-row .col-12,
+.camera-row .col-md-6 {
+    padding: 10px; /* leave padding in px */
+}
+
+/* Sticky Violations Summary */
+.sticky-top {
+    top: 2.3vh; /* converted from 20px to vh */
+    z-index: 10;
+}
+
+/* Tabs padding */
+.nav-tabs {
+    margin-bottom: 1.7vh; /* converted from 15px to vh */
+}
+ 
+.footer {
+    position: fixed;
+    bottom: 5px;
+    right: 10px;
+    font-size: 0.8rem;
+    color: #0a0a0a;
+    font-weight: normal;
+    z-index: 1000;
+}
+
+#imageModal .modal-dialog {
+    max-width: 95vw;
+    margin: auto;
+    margin-top: 10px;
+}
+
+#imageModal .modal-content {
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#imageModal .modal-header,
+#imageModal .modal-footer {
+    flex: 0 0 auto;
+}
+
+#imageModal .modal-body {
+    flex: 1 1 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;      /* no scroll */
+    padding: 15px;         /* modal padding */
+    background: #f8f9fa;   /* optional light bg for modal feel */
+    border-radius: 0 0 6px 6px;
+}
+
+#imageModal img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 4px;    /* subtle look */
+}
+
+#imageModal .modal-content {
+    box-shadow: 0 0 20px rgba(0,0,0,0.45);
+}
+
+
+
+
+/* Add these styles to your existing style.css */
+
+.diagram-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.diagram-img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Status dots for cameras/NUCs/Servers */
+.cam-dot {
+    position: absolute;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    cursor: pointer;
+    transition: transform 0.2s;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+}
+
+.cam-dot:hover {
+    transform: translate(-50%, -50%) scale(1.3);
+}
+
+.cam-dot::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.9);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: pre-line;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    min-width: 200px;
+    text-align: left;
+    line-height: 1.6;
+    border: 1px solid rgba(255,255,255,0.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    z-index: 1000;
+}
+
+.cam-dot:hover::after {
+    opacity: 1;
+}
+
+/* Status colors */
+.cam-dot.active {
+    background: #28a745;
+}
+
+.cam-dot.inactive {
+    background: #dc3545;
+    animation: blink-red 2s infinite;
+}
+
+.cam-dot.disabled {
+    background: #6c757d;
+}
+
+@keyframes blink-red {
+    0%, 100% { 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4), 0 0 0 0 rgba(220,53,69,0.8);
+        opacity: 1;
+    }
+    50% { 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4), 0 0 0 8px rgba(220,53,69,0);
+        opacity: 0.7;
+    }
+}
+
+/* Invisible info hover areas for locations - same style as cam-dot */
+.location-dot {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    z-index: 5;
+    background: transparent;
+    border: none;
+    transform: translate(-50%, -50%);
+}
+
+.location-dot::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.9);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: pre-line;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+    min-width: 200px;
+    text-align: left;
+    line-height: 1.6;
+    border: 1px solid rgba(255,255,255,0.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    z-index: 1000;
+}
+
+.location-dot:hover::after {
+    opacity: 1;
+}
+
+.legend {
+    text-align: center;
+    margin-top: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 6px;
+}
+
+.legend-item {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 15px;
+    font-size: 14px;
+}
+
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}

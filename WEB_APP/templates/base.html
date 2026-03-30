@@ -2,80 +2,70 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{% block title %}My Django App{% endblock %}</title>
+    <title>{% block title %}SURFACE INSPECTION TALOJA{% endblock %}</title>
 
-    <link href="{% static 'css/bootstrap.min.css' %}" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/bootstrap-icons.css' %}">
+    <link rel="stylesheet" href="{% static 'css/fa-all.css' %}">
+    <link rel="stylesheet" href="{% static 'css/daterangepicker.css' %}" />
+
+    <!-- Finally, your custom styles LAST -->
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    <link rel="icon" type="image/png" href="{% static 'logo/hindalco.png' %}">
 
 </head>
 
 <body class="bg-light">
-
-    <!-- Top Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="#">My Django App</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent"
-                aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-
-            <div class="collapse navbar-collapse justify-content-end" id="navbarContent">
-                <ul class="navbar-nav mb-2 mb-lg-0">
-                    <li class="nav-item">
-                        <a href="{% url 'dashboard' %}" class="nav-link">Home</a>
-                    </li>
-                    {% if user.is_authenticated %}
-                        <li class="nav-item">
-                            <a href="{% url 'api_dashboard' %}" class="nav-link">API Dashboard</a>
-                        </li>
-                        <li class="nav-item">
-                            <a href="{% url 'logout' %}" class="nav-link">Logout</a>
-                        </li>
-                    {% else %}
-                        <li class="nav-item">
-                            <a href="{% url 'login' %}" class="nav-link">Login</a>
-                        </li>
-                    {% endif %}
+    
+    <!-- Header -->
+    <header class="bg-white shadow-sm p-3 d-flex align-items-center justify-content-between">
+        <img src="{% static 'logo/hindalco.png' %}" style="width: 7rem; height: 4rem;">
+        <h3 class="fw-bold text-center flex-grow-1">SURFACE INSPECTION TALOJA</h3>
+        <div class="d-flex align-items-center position-relative">
+            <!-- Right Profile Dropdown -->
+            <div class="dropdown ms-auto">
+                <a class="nav-link dropdown-toggle d-flex align-items-center" href="#" id="UserDropdown" data-bs-toggle="dropdown" aria-expanded="false"style="margin-right: 3rem;">
+                <img class="img-xs rounded-circle me-2" src="{% static 'logo/pic-4.png' %}" alt="Profile image" />
+                <span class="font-weight-normal">{{ username }}</span>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="UserDropdown">
+                <li>
+                    <a class="dropdown-item" href="{% url 'logout' %}">
+                    <i class="dropdown-item-icon icon-power text-primary"></i> Logout
+                    </a>
+                </li>
                 </ul>
             </div>
         </div>
-    </nav>
+    </header>
 
-    <!-- Main Content with Sidebar -->
-    <div class="container mt-4">
-        <div class="row">
-            <!-- Sidebar -->
-            {% if user.is_authenticated %}
-            <aside class="col-md-3 mb-4">
-                <div class="card shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title fw-bold mb-3">Navigation</h5>
-                        <ul class="list-group list-group-flush">
-                            {% if user.is_superuser %}
-                                <li class="list-group-item"><a href="{% url 'dashboard' %}" class="text-primary text-decoration-none">Admin Dashboard</a></li>
-                                <li class="list-group-item"><a href="{% url 'admin:index' %}" class="text-primary text-decoration-none">Admin Panel</a></li>
-                            {% elif user.is_staff %}
-                                <li class="list-group-item"><a href="{% url 'dashboard' %}" class="text-primary text-decoration-none">Staff Dashboard</a></li>
-                            {% else %}
-                                <li class="list-group-item"><a href="{% url 'dashboard' %}" class="text-primary text-decoration-none">Employee Dashboard</a></li>
-                            {% endif %}
-                            <li class="list-group-item"><a href="{% url 'api_dashboard' %}" class="text-primary text-decoration-none">API Dashboard</a></li>
-                        </ul>
-                    </div>
-                </div>
-            </aside>
-            {% endif %}
-
-            <!-- Main Content -->
-            <main class="col-md-9">
-                {% block content %}
-                {% endblock %}
-            </main>
-        </div>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+     
+    <div class="mt-4">
+        <main class="col-12 col-md-12 col-xl-12 px-md-4">
+            {% block content %}
+            {% endblock %}
+        </main>
     </div>
-
+    
     <!-- Offline Bootstrap JS -->
+    <script src="{% static 'js/jquery-3.6.4.min.js' %}"></script>
+    <script src="{% static 'js/moment/moment.min.js' %}"></script>
     <script src="{% static 'js/bootstrap.bundle.min.js' %}"></script>
-</body>
+    <script src="{% static 'js/daterangepicker/daterangepicker.js' %}"></script>
+    <script src="{% static 'js/bootstrap-datepicker/bootstrap-datepicker.min.js' %}"></script>
+    <script src="{% static 'js/chart.js' %}"></script>
+    
 
+    <!-- Finally, your custom scripts LAST -->
+    <script src="{% static 'js/script.js' %}"></script>
+
+</body>
 </html>

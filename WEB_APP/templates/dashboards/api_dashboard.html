@@ -1,8 +1,439 @@
 {% extends 'base.html' %}
-{% block title %}API Dashboard{% endblock %}
+{% load static %}
+
 {% block content %}
+
 <div class="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-xl">
-    <h2 class="text-2xl font-bold mb-4">API Dashboard</h2>
     <p>{{ message }}</p>
 </div>
+
+<!-- Tabs -->
+<div class="d-flex align-items-center w-100" style="margin-left:13px; margin-top:-22px;">
+    <!-- Left Tabs -->
+    <ul class="nav nav-tabs flex-grow-1" style="padding: 7px;">
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#DASHBOARD">DASHBOARD</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#HISTORY">HISTORY</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#HEALTH">HEALTH STATUS</button>
+        </li>
+    </ul>
+</div>
+
+<!-- Tab content -->
+<div class="tab-content">
+
+    <!-- ABF Tab -->
+    <div class="tab-pane fade show " id="DASHBOARD">
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <!-- Images Row -->
+                <div class="row g-2 mb-3">
+                    <div class="col-6 text-center border border-3 rounded">
+                        <h5 class="mb-1 mt-1 text-primary"><i class="bi bi-camera-video"></i> Live Camera View 1</h5>
+                        <img id="hikCam1"
+                            src="{% static 'img/1.jpg' %}"
+                            alt="Image 1"
+                            class="img-fluid rounded border mb-3"
+                            style="max-height: 630px; object-fit: contain;">
+                    </div>
+                    
+                    <div class="col-6 text-center border border-3 rounded">
+
+                        <h5 class="mb-1 mt-1 text-primary"> Last 10 Defects</h5>
+                        <!-- ABF Table -->
+                        <div class="table-responsive mx-3">
+                            <table class="table table-bordered table-sm align-middle text-center" id="ABF_table">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>SNo.</th>
+                                        <th>DEFECT NAME</th>
+                                        <th>DEFECT SIZE</th>
+                                        <th>CYCLE UID</th>
+                                        <th>DATE & TIME</th>
+                                        <th>VIEW IMAGE</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ABF_body">
+                                    
+
+                                </tbody>
+
+
+                                <div id="pagination-abf" class="d-flex justify-content-between mt-3 py-2"></div>
+
+                            </table>
+                        </div>
+
+
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+
+        {% comment %} <div class="card shadow-sm">
+            <div class="card-body">
+                <!-- Filters -->
+                <div class="row g-3 align-items-end mb-3">
+
+                    <!-- Calender -->
+                    <div class="col-md-2 d-flex align-items-start">
+                        <div class="input-group">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text h-100"><i class="far fa-calendar-alt"></i></span>
+                                </span>
+                            </div>
+                            <input type="text" id="date_range-abf" name="date_range-abf" class="form-control"
+                                placeholder="Select Planned Date Range" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <!-- Search Anode Number -->
+                    <div class="col-md-2 d-flex align-items-start">
+                        <div class="input-group">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text h-100"><i class="fas fa-search"></i></span>
+                            </div>
+                            <input type="text" id="anode_number_search-abf" name="anode_number_search-abf" 
+                                class="form-control" placeholder="Search Anode Number" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <div class="col-md-8 d-flex align-items-start row">
+                        <div class="col-md-2 d-flex align-items-center">
+                            <button class="btn btn-success mx-2 w-30" onclick="fetchABFData()">Fetch Data</button>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-start">
+                            <div class="mt-2">
+                                <h5>Total Bunch : <span id="total_bunch_count">0</span></h5>
+                            </div>
+                        </div>
+                        <div class="col-md-8 d-flex align-items-start"></div>
+                        <!-- <button id="download-csv-btn" class="btn btn-success w-100 mx-5" >Download CSV</button> -->
+                    </div>
+                </div>
+
+                <!-- ABF Table -->
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm align-middle text-center" id="ABF_table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SNo.</th>
+                                <th>ANODE PACKET</th>
+                                <th>PACKET CREATION TIME</th>
+                                <th>FTA LOCATION</th>
+                                <th>FTA PUTIN TIME</th>
+                                <th>FTA PUTOUT TIME</th>
+                                <th>FTA SECTION/PIT</th>
+                                <th>VIEW PACKET DETAILS</th>
+                                <th>VIEW FTA DETAILS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ABF_body"></tbody>
+                    </table>
+                </div>
+                
+            </div>
+        </div>  {% endcomment %}
+        
+    </div>
+
+    <!-- HUH Tab -->
+    <div class="tab-pane fade show active" id="HISTORY">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <!-- Filters -->
+                <div class="row g-3 align-items-end mb-3">
+
+                    <!-- Calender -->
+                    <div class="col-md-2 d-flex align-items-start">
+                        <div class="input-group">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text h-100"><i class="far fa-calendar-alt"></i></span>
+                                </span>
+                            </div>
+                            <input type="text" id="date_range-huh" name="date_range-huh" class="form-control"
+                                placeholder="Select Planned Date Range" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <!-- Search Anode Number -->
+                    <div class="col-md-2 d-flex align-items-start">
+                        <div class="input-group">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text h-100"><i class="fas fa-search"></i></span>
+                            </div>
+                            <input type="text" id="anode_number_search-huh" name="anode_number_search-huh" 
+                                class="form-control" placeholder="Search Anode Number" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <div class="col-md-8 d-flex align-items-start row">
+                        <div class="col-md-2 d-flex align-items-center">
+                            <button class="btn btn-success mx-2 w-30" onclick="fetchHUHData()">Fetch Data</button>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-start">
+                            <div class="mt-2">
+                                <h5>Total Count : <span id="total_stem_count">0</span></h5>
+                            </div>
+                        </div>
+                        <div class="col-md-8 d-flex align-items-start"></div>
+                        <!-- <button id="download-csv-btn" class="btn btn-success w-100 mx-5" >Download CSV</button> -->
+                    </div>
+                </div>
+
+
+                <!-- HUH Table -->
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm align-middle text-center" id="HUH_table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SNo.</th>
+                                <th>DEFECT NAME</th>
+                                <th>DEFECT SIZE</th>
+                                <th>CYCLE UID</th>
+                                <th>DATE & TIME</th>
+                                <th>VIEW IMAGE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="HUH_body"></tbody>
+                    </table>
+                </div>
+                <div id="pagination-huh" class="d-flex justify-content-between mt-3 py-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade show" id="HEALTH">
+        <div class="card shadow-sm">
+            <div class="card-body">
+
+                <div class="diagram-wrapper">
+                    <div style="position: relative;">
+                        <img src="{% static 'img/health_map.jpg' %}" alt="System Diagram" class="diagram-img">
+                        
+                        <div id="location-dots"></div>
+                        <div id="camera-indicators"></div>
+                    </div>
+                </div>
+
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #28a745;"></div>
+                        <span>ACTIVE</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #dc3545;"></div>
+                        <span>INACTIVE</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #6c757d;"></div>
+                        <span>DISABLED</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Footer -->
+    <div class="footer">
+        Designed By Insightzz
+    </div>
+
+</div>
+
+<!-- Tab Modal -->
+<div class="modal fade" id="tabModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="Stem_title"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+
+                <!-- Modal Tabs -->
+                <div class="d-flex align-items-center w-100" style="margin-left:13px; margin-top:-22px;">
+                    <!-- Left Tabs -->
+                    <ul class="nav nav-tabs flex-grow-1" style="padding: 7px;">
+                        <li class="nav-item">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#modal-anodes">Anodes</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#modal-remarks">Remarks</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#modal-recipe">Recipe</button>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Tab content -->
+                <div class="tab-content">
+
+                    <!-- ANODES Tab -->
+                    <div class="tab-pane fade show active" id="modal-anodes">
+                        <!-- Anodes Table -->
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm align-middle text-center">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>SNo.</th>
+                                        <th>ANODE NUMBER</th>
+                                        <th>POSITION</th>
+                                        <th>CAPTURE TIME</th>
+                                        <th>VIEW AND EDIT ANODE</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="Anodes_body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- ANODES Tab -->
+                    <div class="tab-pane fade show" id="modal-remarks">
+                        <!-- Anodes Table -->
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm align-middle text-center">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>SNo.</th>
+                                        <th>ZONE</th>
+                                        <th>POT ROOM</th>
+                                        <th>REMARK ADDED TIME</th>
+                                        <th>REMARK</th>
+                                        <th>VIEW IMAGE</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="Remarks_body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Recipe Tab -->
+                    <div class="tab-pane fade show" id="modal-recipe">
+                        <h5>Nothing to display here !!</h5>
+                    </div>
+
+                </div>
+
+            </div>
+            <div class="modal-footer"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Table Modal -->
+<div class="modal fade" id="tableModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="Bunch_title"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+
+                <!-- Bunch Table -->
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm align-middle text-center">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SNo.</th>
+                                <th>ANODE NUMBER</th>
+                                <th>IMAGE CAPTURE TIME</th>
+                                <th>VIEW AND EDIT ANODE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="Bunch_body"></tbody>
+                    </table>
+                </div>
+
+            </div>
+            <div class="modal-footer"></div>
+        </div>
+    </div>
+</div>
+
+{% comment %} <!-- Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-fullscreen-lg-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="BunchID_title"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="zoomWrapper" class="position-relative" style="overflow:hidden; width:100%; min-height:60vh; cursor:grab;">
+                    <div id="imageLoader"
+                        class="position-absolute top-50 start-50 translate-middle text-center"
+                        style="display:none; z-index:10;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div class="mt-2">Loading image...</div>
+                    </div>
+                    <img id="modalImage" src=""
+                        style="user-select:none; -webkit-user-drag:none; transform-origin:center center;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="d-flex align-items-center w-100 justify-content-start">
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="fw-bold mb-0 mx-1">Anode Number:</label>
+                        <input type="text" id="editAnodeInput" class="form-control form-control-sm mx-3"
+                            style="width: 250px;">
+                        <input type="hidden" id="loc_hidden">
+                        <input type="hidden" id="anodeId_hidden">
+                        <input type="hidden" id="bunchId_hidden">
+                        <input type="hidden" id="stemid_hidden">
+                    </div>
+                    <button type="button" class="btn btn-success mx-2" id="updateImageBtn">Update</button>
+                    <p class="m-2 text-primary" id="updateImageBtn"><strong>Note :</strong> Use scroll to zoom in and zoom out.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div> {% endcomment %}
+
+
+
+<!-- Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-fullscreen-lg-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="vehicle_number"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="zoomWrapper" class="position-relative" style="overflow:hidden; width:100%; min-height:60vh; cursor:grab;">
+                    <div id="imageLoader"
+                        class="position-absolute top-50 start-50 translate-middle text-center"
+                        style="display:none; z-index:10;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div class="mt-2">Loading image...</div>
+                    </div>
+                    <img id="modalImage" src=""
+                        style="user-select:none; -webkit-user-drag:none; transform-origin:center center;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="d-flex align-items-center w-100 justify-content-start">
+                    <p class="m-2 text-primary" id="updateImageBtn"><strong>Note :</strong> Use scroll to zoom in and zoom out.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
 {% endblock %}

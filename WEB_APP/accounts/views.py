@@ -46,7 +46,7 @@ class DashboardView(LoginRequiredMixin, TemplateView):
     def get_template_names(self):
         user = self.request.user
         if user.is_superuser:
-            return ['dashboards/admin_dashboard.html']
+            return ['dashboards/api_dashboard.html']
         elif user.is_staff:
             return ['dashboards/staff_dashboard.html']
         else:
