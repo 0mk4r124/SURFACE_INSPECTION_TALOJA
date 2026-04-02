@@ -129,39 +129,45 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 });
 
-function fetchLast10Entries() {
-    const url = `/api/last-10-entries/`;
-    
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            print("Last 10 entries:", data.data);
-            populateTable(data.data, 'HUH_body');
-            document.getElementById("total_stem_count").textContent = data.count;
-        })
-        .catch(err => console.error("Error fetching last 10 entries:", err));
-}
 
 
 function fetchLastConfigurations() {
     fetch('/api/last-10-entries/')
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-        return res.json();
-      })
-      .then(data => {
-        console.log("Fetched stone configurations:", data);
-         populateTable(data.data, 'ABF_body');
-      })
-      .catch(err => {
-        console.error('Error fetching stone configurations:', err);
-      });
-  }
+        .then(res => {
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            return res.json();
+        })
+        .then(data => {
+            console.log("Fetched stone configurations:", data);
+            populateTable(data.data, 'ABF_body');
+        })
+        .catch(err => {
+            console.error('Error fetching stone configurations:', err);
+        });
+}
 
 
-function fetchABFData(page=1) {
+function health_status() {
+    fetch('/api/health-status/')
+        .then(res => {
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            return res.json();
+        })
+        .then(data => {
+            console.log("Fetched health status:", data);
+            populateTable(data.data, 'health_body');
+        })
+        .catch(err => {
+            console.error('Error fetching health status:', err);
+        });
+}
+
+
+function fetchABFData(page = 1) {
     const dateRange = document.getElementById('date_range-abf').value;
     if (!dateRange) {
         alert("Please select a date range");
@@ -173,14 +179,14 @@ function fetchABFData(page=1) {
         // Single date selected
         startDate = endDate = dateRange.trim();
     }
-    
+
     // Get anode number search value
     const anodeNumber = document.getElementById('anode_number_search-abf').value.trim();
     let url = `/api/fetch_abf_data/?start_date=${startDate}&end_date=${endDate}&page=${page}`;
     if (anodeNumber) {
         url += `&anode_number=${encodeURIComponent(anodeNumber)}`;
     }
-    
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
@@ -191,7 +197,7 @@ function fetchABFData(page=1) {
         .catch(err => console.error(err));
 }
 
-function fetchHUHData(page=1) {
+function fetchHUHData(page = 1) {
     const dateRange = document.getElementById('date_range-huh').value;
     if (!dateRange) {
         alert("Please select a date range");
@@ -205,13 +211,13 @@ function fetchHUHData(page=1) {
         startDate = endDate = dateRange.trim();
     }
 
-    // Get anode number search value
-    const anodeNumber = document.getElementById('anode_number_search-huh').value.trim();
+    // Get coil number search value
+    const coilNumber = document.getElementById('coil_number_search-huh').value.trim();
     let url = `/api/fetch_history_data/?start_date=${startDate}&end_date=${endDate}&page=${page}`;
-    if (anodeNumber) {
-        url += `&anode_number=${encodeURIComponent(anodeNumber)}`;
+    if (coilNumber) {
+        url += `&coil_number=${encodeURIComponent(coilNumber)}`;
     }
-    
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
@@ -232,21 +238,21 @@ function fetchBunchData(bunch_id, loc) {
     } else if (loc === "fta") {
         url = `/api/fetch_fta_bunch_data/?bunch_id=${bunch_id}`;
     }
-    
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
             populateTable(data.data, 'Bunch_body', loc);
             document.getElementById("Bunch_title").innerHTML = `Bunch Number: <b>${bunch_id}</b>`;
         })
-     
+
         .catch(err => console.error(err));
 }
 
 function fetchStemData(stem_id) {
 
     const url = `/api/fetch_stem_data/?stem_id=${stem_id}`;
-    
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
@@ -257,42 +263,40 @@ function fetchStemData(stem_id) {
         .catch(err => console.error(err));
 }
 
-function populateTable(data, table_name, loc='') {
+function populateTable(data, table_name, loc = '') {
     const tbody = document.getElementById(table_name);
     tbody.innerHTML = '';
 
-    if (table_name === 'ABF_body'){
+    if (table_name === 'ABF_body') {
         data.forEach(row => {
             const tr = document.createElement('tr');
 
             const Img1Button = row.view_image
-            ? `<button class="btn btn-sm btn-primary view-image-btn" data-src="${row.view_image}">Image View</button>`
-            : "";
+                ? `<button class="btn btn-sm btn-primary view-image-btn" data-src="${row.view_image}">Image View</button>`
+                : "";
 
             tr.innerHTML = `
                 <td>${row.sno}</td>
                 <td>${row.defect_name}</td>
-                <td>${row.defect_size} mm</td>
+                <td>${row.defect_x_size} * ${row.defect_y_size} mm</td>
                 <td>${row.cycle_uid}</td>
                 <td>${row.create_time}</td>
-                <td>${ Img1Button }</td>
+                <td>${Img1Button}</td>
                 `;
             tbody.appendChild(tr);
         });
     }
-    else if (table_name === 'Bunch_body') {
+    else if (table_name === 'health_body') {
         data.forEach(row => {
             const tr = document.createElement('tr');
 
+            const statusColor = row.status === 'ACTIVE' ? 'green' : (row.status === 'INACTIVE' ? 'red' : 'inherit');
+
             tr.innerHTML = `
                 <td>${row.sno}</td>
-                <td>${row.anode_number}</td>
-                <td>${row.capture_time}</td>
-                <td>
-                ${row.view_image 
-                    ? `<button class="btn btn-sm btn-primary view-image-btn" data-loc="${loc}" data-anodeid="${row.anode_number}" data-bunch_name="${row.bunch_name}" data-src="${row.view_image}">Image View</button>` 
-                    : 'No Image'}
-                </td>
+                <td>${row.device_type}</td>
+                <td style="color: ${statusColor}; font-weight: bold;">${row.status}</td>
+                <td>${row.last_ping}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -302,16 +306,16 @@ function populateTable(data, table_name, loc='') {
             const tr = document.createElement('tr');
 
             const Img1Button = row.view_image
-            ? `<button class="btn btn-sm btn-primary view-image-btn" data-src="${row.view_image}">Image View</button>`
-            : "";
+                ? `<button class="btn btn-sm btn-primary view-image-btn" data-src="${row.view_image}">Image View</button>`
+                : "";
 
             tr.innerHTML = `
                 <td>${row.sno}</td>
                 <td>${row.defect_name}</td>
-                <td>${row.defect_size} mm</td>
+                <td>${row.defect_x_size} * ${row.defect_y_size} mm</td>
                 <td>${row.cycle_uid}</td>
                 <td>${row.create_time}</td>
-                <td>${ Img1Button }</td>
+                <td>${Img1Button}</td>
                 `;
             tbody.appendChild(tr);
         });
@@ -326,8 +330,8 @@ function populateTable(data, table_name, loc='') {
                 <td>${row.position}</td>
                 <td>${row.capture_time}</td>
                 <td>
-                ${row.view_image 
-                    ? `<button class="btn btn-sm btn-primary view-stem-image-btn" data-anodeid="${row.anode_number}" data-stemid="${row.stemid}" data-src="${row.view_image}">Image View</button>` 
+                ${row.view_image
+                    ? `<button class="btn btn-sm btn-primary view-stem-image-btn" data-anodeid="${row.anode_number}" data-stemid="${row.stemid}" data-src="${row.view_image}">Image View</button>`
                     : 'No Image'}
                 </td>
             `;
@@ -345,8 +349,8 @@ function populateTable(data, table_name, loc='') {
                 <td>${row.capture_time}</td>
                 <td>${row.remark}</td>
                 <td>
-                ${row.view_image 
-                    ? `<button class="btn btn-sm btn-primary view-stem-image-btn" data-stemid="${row.stem_number}" data-src="${row.view_image}">Image View</button>` 
+                ${row.view_image
+                    ? `<button class="btn btn-sm btn-primary view-stem-image-btn" data-stemid="${row.stem_number}" data-src="${row.view_image}">Image View</button>`
                     : 'No Image'}
                 </td>
             `;
@@ -403,8 +407,8 @@ function renderPagination(pagination, tab) {
             <nav>
                 <ul class="pagination mb-0">
                 ${pagination.has_previous ?
-                    `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page - 1}">Previous</a></li>` :
-                    `<li class="page-item disabled"><span class="page-link">Previous</span></li>`}
+            `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page - 1}">Previous</a></li>` :
+            `<li class="page-item disabled"><span class="page-link">Previous</span></li>`}
     `;
 
     pagination.custom_page_range.forEach(num => {
@@ -419,8 +423,8 @@ function renderPagination(pagination, tab) {
 
     html += `
                 ${pagination.has_next ?
-                    `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page + 1}">Next</a></li>` :
-                    `<li class="page-item disabled"><span class="page-link">Next</span></li>`}
+            `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page + 1}">Next</a></li>` :
+            `<li class="page-item disabled"><span class="page-link">Next</span></li>`}
                 </ul>
             </nav>
         </div>
@@ -432,8 +436,8 @@ function renderPagination(pagination, tab) {
         link.addEventListener("click", function (e) {
             e.preventDefault();
             const page = parseInt(this.getAttribute("data-page"));
-            if (tab === 'abf') {if (!isNaN(page)) fetchABFData(page);}
-            if (tab === 'huh') {if (!isNaN(page)) fetchHUHData(page);}
+            if (tab === 'abf') { if (!isNaN(page)) fetchABFData(page); }
+            if (tab === 'huh') { if (!isNaN(page)) fetchHUHData(page); }
         });
     });
 }
@@ -450,27 +454,28 @@ document.getElementById('updateImageBtn').addEventListener("click", function () 
         old_anode: old_anode,
         new_anode: newAnodeId,
     };
-    
+
     if (bunchId) payload.bunch = bunchId;
     if (stemid) payload.stemid = stemid;
 
     fetch(`/api/update_anode/`, {
         method: "POST",
-        headers: { 
+        headers: {
             "X-CSRFToken": csrftoken,
-            "Content-Type": "application/json", },
+            "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
     })
-    .then(r => r.json())
-    .then(res => {
-        if (res.success) {
-            bootstrap.Modal.getInstance(document.getElementById("imageModal")).hide();
-            if (bunchId) {fetchBunchData(bunchId, loc);}
-            else if (stemid) {fetchStemData(stemid);}
-        }
-        else alert("Failed to update")
-    })
-    .catch(err => console.error(err));
+        .then(r => r.json())
+        .then(res => {
+            if (res.success) {
+                bootstrap.Modal.getInstance(document.getElementById("imageModal")).hide();
+                if (bunchId) { fetchBunchData(bunchId, loc); }
+                else if (stemid) { fetchStemData(stemid); }
+            }
+            else alert("Failed to update")
+        })
+        .catch(err => console.error(err));
 });
 
 // document.addEventListener('click', function (e) {
@@ -518,7 +523,7 @@ document.addEventListener('click', function (e) {
     document.getElementById("imageModal").dataset.src = imgSrc;
 });
 
-document.addEventListener('click', function(e) {
+document.addEventListener('click', function (e) {
 
     const btn = e.target.closest('.view-table-btn');
     if (!btn) return;
@@ -540,7 +545,7 @@ document.addEventListener('click', function(e) {
     tableModal.show();
 });
 
-document.addEventListener('click', function(e) {
+document.addEventListener('click', function (e) {
 
     // Check if a "View" button was clicked
     const btn = e.target.closest('.view-tab-btn');
@@ -560,7 +565,7 @@ document.getElementById('tabModal')
 
         const firstTab = this.querySelector('.nav-link');
         bootstrap.Tab.getOrCreateInstance(firstTab).show();
-});
+    });
 
 document.getElementById("modalImage").addEventListener("load", function () {
 
@@ -586,7 +591,7 @@ document.getElementById("imageModal")
         img.src = "";
         img.style.display = "none";
         loader.style.display = "none";
-});
+    });
 
 document.getElementById("imageModal")
     .addEventListener("shown.bs.modal", function () {
@@ -607,7 +612,7 @@ document.getElementById("imageModal")
             img.src = "";
             img.src = src;
         });
-});
+    });
 
 
 
@@ -753,7 +758,7 @@ document.getElementById("imageModal")
 function updateSystemStatus() {
     const cameraContainer = document.getElementById('camera-indicators');
     const locationContainer = document.getElementById('location-dots');
-    
+
     cameraContainer.innerHTML = '';
     locationContainer.innerHTML = '';
 
@@ -769,7 +774,7 @@ function updateSystemStatus() {
             if (info.status) statusClass = info.status.toLowerCase();
             dot.className = `cam-dot ${statusClass}`;
         }
-        
+
         dot.style.top = `${info.top}%`;
         dot.style.left = `${info.left}%`;
 
@@ -799,7 +804,7 @@ async function fetchSystemStatus() {
         const response = await fetch('/api/health_status/');
         const data = await response.json();
         systemData = data.data;
-        
+
         updateSystemStatus();
     } catch (error) {
         console.error('Error fetching system status:', error);
@@ -807,13 +812,13 @@ async function fetchSystemStatus() {
 }
 
 // Initialize
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // fetchSystemStatus();
     // Update every 10 seconds
     // setInterval(fetchSystemStatus, 10000);
-    // setInterval(fetchLast10Entries, 10000);
+    setInterval(health_status, 2000);
     fetchLastConfigurations()
-  
+
 });
 
 
@@ -843,7 +848,7 @@ document.getElementById("imageModal")
         img.src = "";
         img.style.display = "none";
         loader.style.display = "none";
-});
+    });
 
 document.getElementById("imageModal")
     .addEventListener("shown.bs.modal", function () {
@@ -862,12 +867,12 @@ document.getElementById("imageModal")
         // Force browser paint before loading
         requestAnimationFrame(() => {
             img.src = "";
-            img.onload = function() {
+            img.onload = function () {
                 loader.style.display = "none";
                 img.style.display = "block";
                 isImageLoading = false;
             };
-            img.onerror = function() {
+            img.onerror = function () {
                 loader.style.display = "none";
                 img.style.display = "block";
                 isImageLoading = false;
@@ -875,4 +880,4 @@ document.getElementById("imageModal")
             };
             img.src = src;
         });
-});
+    });

@@ -90,6 +90,7 @@ def serve_file(request):
 def fetch_history_data(request):
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
+    coil_number = request.GET.get('coil_number')
     page = int(request.GET.get('page', 1))
     per_page = 10  # records per page
     
@@ -104,6 +105,9 @@ def fetch_history_data(request):
         create_time__date__lte=end_dt,
     ).order_by("create_time")
 
+    if coil_number:
+        queryset = queryset.filter(cycle_uid__icontains=coil_number)
+
     total = queryset.count()
     start_idx = (page - 1) * per_page
     end_idx = start_idx + per_page
@@ -114,7 +118,8 @@ def fetch_history_data(request):
         results.append({
             "sno": idx,
             "defect_name": row.defect_name,
-            "defect_size": row.defect_size,
+            "defect_x_size": row.defect_x_size,
+            "defect_y_size": row.defect_y_size,
             "cycle_uid": row.cycle_uid,
             "img_path": row.img_path,
             "view_image": f"/api/serve-file?file={row.img_path}" if row.img_path else None,
@@ -143,7 +148,8 @@ def last_ten_entries(request):
             results.append({
                 "sno": idx,
                 "defect_name": row.defect_name,
-                "defect_size": row.defect_size,
+                "defect_x_size": row.defect_x_size,
+                "defect_y_size": row.defect_y_size,
                 "cycle_uid": row.cycle_uid,
                 "img_path": row.img_path,
                 "view_image": f"/api/serve-file?file={row.img_path}" if row.img_path else None,
@@ -158,3 +164,33 @@ def last_ten_entries(request):
         })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def health_status_view(request):
+    """
+    API endpoint to fetch all health status data
+    """
+    try:
+        queryset = HEALTH_STATUS.objects.all()
+        results = []
+        for idx, row in enumerate(queryset, start=1):
+            results.append({
+                "sno": idx,
+                "location": row.location,
+                "device_type": row.device_type,
+                "ip": row.ip,
+                "camera_serial_number": row.camera_serial_number,
+                "status": row.status,
+                "last_ping": row.last_ping.strftime("%d-%m-%Y %I:%M%p") if row.last_ping else None,
+                "top": row.top,
+                "left": row.left,
+            })
+        return JsonResponse({
+            "data": results,
+            "count": len(results)
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+

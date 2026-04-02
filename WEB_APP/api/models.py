@@ -5,7 +5,7 @@ from django.utils import timezone
 class HEALTH_STATUS(models.Model):
     id = models.AutoField(db_column='ID', primary_key=True)
     location = models.CharField(db_column='LOCATION', max_length=50)
-    device_type = models.CharField(db_column='DEVICE_TYPE', max_length=10, blank=True, null=True)
+    device_type = models.CharField(db_column='DEVICE_TYPE', max_length=50, blank=True, null=True)
     ip = models.CharField(db_column='IP', max_length=50, blank=True, null=True, unique=True)
     camera_serial_number = models.CharField(db_column='CAMERA_SERIAL_NUMBER', max_length=50, blank=True, null=True)
     status = models.CharField(db_column='STATUS', max_length=20, blank=True, null=True)
@@ -26,7 +26,8 @@ class HEALTH_STATUS(models.Model):
 class DEFECTS_HISTORY(models.Model):
     id = models.AutoField(db_column='ID', primary_key=True)
     defect_name = models.CharField(db_column='DEFECT_NAME', max_length=255)
-    defect_size = models.FloatField(db_column='DEFECT_SIZE', blank=True, null=True)
+    defect_x_size = models.FloatField(db_column='DEFECT_X_SIZE', blank=True, null=True)
+    defect_y_size = models.FloatField(db_column='DEFECT_Y_SIZE', blank=True, null=True)
     cycle_uid = models.CharField(db_column='CYCLE_UID', max_length=50)
     create_time = models.DateTimeField(db_column='CREATE_TIME', auto_now_add=True)
     img_path = models.CharField(db_column='IMG_PATH', max_length=500, blank=True, null=True)
