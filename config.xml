@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <HEALTH_CHECKER>
     <SYSTEM_PATH>
-        <LOG_FILE_PATH>/home/iamsuraj/Projects/TALOJA EXECUTION/CODE/SURFACE_INSPECTION_TALOJA/LOGS/HEALTH_CHECKER/</LOG_FILE_PATH>
+        <LOG_FILE_PATH>/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/LOGS/HEALTH_CHECKER/</LOG_FILE_PATH>
         <LOG_BACKUP_COUNT>7</LOG_BACKUP_COUNT>
     </SYSTEM_PATH>
     <DATABASE_DETAILS>
         <DB_HOST>localhost</DB_HOST>
         <DB_USER>root</DB_USER>
-        <DB_PASS>root</DB_PASS>
+        <DB_PASS>insightzz@123</DB_PASS>
         <DB_NAME>SURFACE_INSPECTION_TALOJA</DB_NAME>
     </DATABASE_DETAILS>
     <DEVICES>

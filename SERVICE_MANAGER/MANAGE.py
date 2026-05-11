@@ -38,10 +38,10 @@ SERVICES = {
     # "Algorithm": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC_MANAGER.py",
     # "Trigger HUH": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER_HUH.py",
     # "Trigger SHOTBLAST": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER_SHOTBLAST.py",
-    # "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver 0.0.0.0:9000",
+    "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
     # "Web Mobile": f"{BASE_FILE_PATH}/SCRIPTS/FLASK_SERVER.py",
     # "Data Sync": f"{BASE_FILE_PATH}/SCRIPTS/DATA_SYNC.py",
-    # "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
+    "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
 }
 
 PYTHON_EXE = sys.executable
@@ -131,7 +131,8 @@ class ServiceTab(QWidget):
         self.watchdog_timer.start(10000)  # check every 10 seconds
 
         # Auto start services
-        if "Web" not in self.name: self.start_service()
+        # if "Web" not in self.name: self.start_service()
+        self.start_service()
 
     def append_log(self, text: str):
         """Safe append to log area and auto-scroll."""
@@ -266,7 +267,7 @@ class ServiceTab(QWidget):
 
     def process_started(self):
         self.append_log("[INFO] process started")
-        self.last_output_time = time.time()  # NEW
+        self.last_output_time = time.time() # NEW
         set_status_color(self.status_label, "Running", "Status")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -294,7 +295,7 @@ class ServiceTab(QWidget):
         QTimer.singleShot(5000, self.start_service)
 
     def update_disk_status(self):
-        # cross-platform root path
+        #  cross-platform root path
         root_path = "/" if os.name != "nt" else "C:\\"
         try:
             usage = psutil.disk_usage(root_path)

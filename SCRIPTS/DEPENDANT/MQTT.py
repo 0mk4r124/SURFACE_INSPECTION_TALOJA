@@ -23,9 +23,9 @@ class MQTT:
 
     def _on_message(self, client, userdata, msg):
         self.data = json.loads(msg.payload.decode())
-        print(
-            f"[MQTT-{self.name}] RECEIVED | {msg.topic} | {self.data}"
-        )
+        # print(
+        #     f"[MQTT-{self.name}] RECEIVED | {msg.topic} | {self.data}"
+        # )
 
     def publish(self, topic, payload, retain=False):
         msg = json.dumps(payload)

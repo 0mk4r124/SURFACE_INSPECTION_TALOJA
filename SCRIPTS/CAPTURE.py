@@ -18,10 +18,10 @@ from DEPENDANT.MQTT import MQTT
 LOCATION = "TALOJA"
 CAMERA_CONFIGS = {
     "24521939": {
-        "EXPOSURE": 8000.0,
+        "EXPOSURE": 2600.0, # 2600 exposure set after polarizer installed 
         "FRAME_RATE": 122.0,
         "PACKET_SIZE": 7000,
-        "PACKET_DELAY": 0,
+        "PACKET_DELAY": 10,
         "THROUGHPUT": 700000000,
     },
 }
@@ -200,6 +200,8 @@ def process_capture(flir, mq_obj, logger):
                         # )
                     os.makedirs(save_path, exist_ok=True)
                     save_queue.put((comp_path, img))
+                    dtStr = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+                    print(f"Image Added in Queue : {dtStr}")
                     # print(f"Saving {LOCATION}/{bunch_num}")
                 else:
                     print(f"Not saving {LOCATION}/{bunch_num}")

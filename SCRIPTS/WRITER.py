@@ -37,6 +37,7 @@ def initializeLogger():
 class WRITE_REGISTERS:
     POE_RESTART = 4097
     PLC_WRITE = 4106
+    PLC_STOP_LIGHT = 4247
     COBOT_STOP_FEEDBACK = 4099
 
 class READ_REGISTERS:
@@ -79,15 +80,22 @@ def mainFunction():
         while True:
             data = reciever.data
             if any(list(data.keys())):
+                print(data)
+                loc = data['loc']
                 value = int(data["value"])
-                writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
+                if loc == "stop_light":
+                    writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
+                else:
+                    writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
+
+                    
                 # print("Value is Written ")
             # value = readFromPlc(READ_REGISTERS.PLC_READ)
             # print(f"Value is {value} ")
             # writeToPlc(WRITE_REGISTERS.PLC_WRITE, 100)
             # print("Value is Written ")
 
-            time.sleep(0.1)
+            # time.sleep(0.5)
             
     except Exception as e:
         plclogger.error(f"mainFunction() Inside While Exception is : {e}")

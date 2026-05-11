@@ -149,9 +149,28 @@ def main():
                          # Read status and diameter
                          # DataToDeltaPLC[10]: bit 0 -> mill_is_run, bit 1 -> ironing_raised
                          # DataToDeltaPLC[0]: diameter value
+                         # Datatodelataplc[0] - diameter
+                         # Datatodelataplc[1] - Mill speed 
+                         # Datatodelataplc[3] - exit gauge setpoint
+                         # Datatodelataplc[4] - Width
+                         # Datatodelataplc[5] - coil length 
+                         # Datatodelataplc[10].0 - Mill is Run 
+                         # Datatodelataplc[10].1 - Ironing roll Raised Done
 
+                         # writer.publish( f"taloja/client/write",
+                         #                {
+                         #                     "loc": "stop_light",
+                         #                     "value": 1
+                         #                }
+                         #           )
 
+                         # time.sleep(2)
+                         millSpeed = int(plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[1]").value)
+                         exitGauge = int(plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[3]").value)
+                         width = int(plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[4]").value)
+                         coilLength = int(plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[5]").value)
 
+                         print(f"Mill Speed : {millSpeed}, Exit Gauge : {exitGauge}, Width : {width}, Coil Length : {coilLength}")
 
                          # Read bit word
                          bit_rec = plcobj.plc.read(f"{plcobj.FRAME_CAPTURE_SIGNAL}[10]")
@@ -161,6 +180,7 @@ def main():
                          mill_is_run = (status_raw >> 0) & 1
                          ironing_raised = (status_raw >> 1) & 1
 
+                         print(f"{datetime.now()}")
                          print("mill_is_run", mill_is_run)
                          print("ironing_raised",ironing_raised)
 
@@ -199,12 +219,43 @@ def main():
 
                          # Stop condition: mill_is_run=0, ironing_raised=1 (raw=2)
                          elif mill_is_run == 0 and ironing_raised == 1:
-                              if start_capture:
-                                   print(f"ENDED FRAME CAPTURE - PLC Signal (raw=2)")
-                                   log_mill_event(current_roll_id, "stop")
-                                   start_capture = False
-                                   bunch = "INACTIVE"
-                                   current_roll_id = None
+                              # if start_capture:
+                              print(f"ENDED FRAME CAPTURE - PLC Signal (raw=2)")
+                              writer.publish( f"taloja/client/write",
+                                   {
+                                        "loc": "stop_light",
+                                        "value": 1
+                                   }
+                              )
+                              time.sleep(2)
+                         elif ironing_raised == 0:
+                              # if start_capture:
+                              print(f"ENDED FRAME CAPTURE - PLC Signal (raw=2)")
+                              writer.publish( f"taloja/client/write",
+                                   {
+                                        "loc": "stop_light",
+                                        "value": 0
+                                   }
+                              )
+                              time.sleep(2)
+                              # log_mill_event(current_roll_id, "stop")
+                              # start_capture = False
+                              # bunch = "INACTIVE"
+                              # current_roll_id = None
+                         # elif mill_is_run == 0 :
+                         #      # if start_capture and current_roll_id:
+                         #      print(f"ENDED FRAME CAPTURE - Stop Light ")
+                         #      writer.publish( f"taloja/client/write",
+                         #           {
+                         #                "loc": "stop_light",
+                         #                "value": 1
+                         #           }
+                         #      )
+                         #      time.sleep(0.5)
+                         #      log_mill_event(current_roll_id, "stop")
+                         #      start_capture = False
+                         #      bunch = "INACTIVE"
+                         #      current_roll_id = None
                          
                          # else:
                          #      # If mill stops outside of the specific (0,1) state, ensure capture stops
@@ -230,11 +281,12 @@ def main():
                               }
                          )
 
-                         if mill_is_run or diameter > 0:
-                              print(f"PLC ----{datetime.now()}------diam={diameter}, mill={mill_is_run}, capture={bunch}--------")
+                         # if mill_is_run or diameter > 0:
+                         #      print(f"PLC ----{datetime.now()}------diam={diameter}, mill={mill_is_run}, capture={bunch}--------")
 
                          last_trigger = diameter
                          last_mill_run = mill_is_run
+                         time.sleep(1)
 
                     except Exception:
                          plclogger.error(f"{traceback.format_exc()}")
