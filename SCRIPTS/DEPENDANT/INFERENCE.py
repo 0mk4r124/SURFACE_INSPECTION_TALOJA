@@ -112,9 +112,9 @@ class MASKRCNN:
             ))
 
             # if self.debugMode is True:
-            # visualizer = Visualizer(img[:, :, ::-1], metadata=self.metadata, scale=1, instance_mode=ColorMode.IMAGE)
-            # img = visualizer.draw_instance_predictions(output["instances"].to("cpu"))
-            # img = np.array(img.get_image()[:, :, ::-1])
+            visualizer = Visualizer(img[:, :, ::-1], metadata=self.metadata, scale=1, instance_mode=ColorMode.IMAGE)
+            img = visualizer.draw_instance_predictions(output["instances"].to("cpu"))
+            img = np.array(img.get_image()[:, :, ::-1])
 
         except Exception as e:
             print(f"run_inference() Exception is : {e}")
