@@ -13,18 +13,17 @@ from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
 
 # ---------------- CONFIG ---------------- #
-MODEL_DIR = '/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/MODEL/'
+MODEL_DIR = '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/MODEL/'
 
-TEMP_IMAGE_PATH = "/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/RAW_IMG/"
-RESULT_IMAGE_PATH = "/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/RESULT/"
-TRASH_PATH = "/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/TRASH/"
+TEMP_IMAGE_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/RAW_IMG/"
+RESULT_IMAGE_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/RESULT/"
+TRASH_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TRASH/"
 
 LOCATION = "TALOJA"
 
 PADDING = 50
 ALLOWED_DEFECTS = {"DENT", "VIBRATION", "SILVER_MARK"}
 
-# ---------------- DB ---------------- #
 def save_defect_history(cycle_uid, defect_json, defect_str, img_path):
     conn = None
     cursor = None
@@ -42,7 +41,7 @@ def save_defect_history(cycle_uid, defect_json, defect_str, img_path):
         query = """
             INSERT INTO DEFECTS_HISTORY 
             (CYCLE_UID, DEFECT_DETAIL, DEFECT_STR, IMG_PATH, CREATE_TIME)
-            VALUES (%s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s)
         """
 
         cursor.execute(query, (
@@ -63,8 +62,6 @@ def save_defect_history(cycle_uid, defect_json, defect_str, img_path):
         if cursor: cursor.close()
         if conn: conn.close()
 
-
-# ---------------- SORT ---------------- #
 def get_sorted_images(folder):
     files = [
         f for f in os.listdir(folder)
@@ -72,8 +69,6 @@ def get_sorted_images(folder):
     ]
     return sorted(files, key=lambda x: os.path.getmtime(os.path.join(folder, x)))
 
-
-# ---------------- SEVERITY ---------------- #
 def calculate_severity(total):
     if total <= 2:
         return "LOW"
@@ -81,8 +76,6 @@ def calculate_severity(total):
         return "MEDIUM"
     return "HIGH"
 
-
-# ---------------- PROCESS LABELS ---------------- #
 def process_labels(labels, img_shape):
     h, w = img_shape[:2]
     defect_boxes = defaultdict(list)
@@ -129,8 +122,6 @@ def process_labels(labels, img_shape):
     counts = {k: len(v) for k, v in defect_boxes.items()}
     return defect_boxes, counts
 
-
-# ---------------- DRAW ---------------- #
 def draw_boxes(img, defect_boxes):
     for cls, items in defect_boxes.items():
         for obj in items:
@@ -141,8 +132,6 @@ def draw_boxes(img, defect_boxes):
             cv2.putText(img, f"{cls} ({conf}%)", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
     return img
 
-
-# ---------------- SUMMARY ---------------- #
 def add_summary(img, counts, severity):
     total = sum(counts.values())
     top3 = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:3]
@@ -154,8 +143,6 @@ def add_summary(img, counts, severity):
 
     return img
 
-
-# ---------------- PROCESS ONE CYCLE ---------------- #
 def process_cycle(cycle_uid, model):
 
     base_path = os.path.join(TEMP_IMAGE_PATH, LOCATION, cycle_uid)
@@ -180,9 +167,10 @@ def process_cycle(cycle_uid, model):
                 continue
 
             try:
+                print(rank)
                 masked_img, labels = model.run_inference(img)
-                try: cv2.imwrite("test.jpg", masked_img)
-                except: pass
+                # try: cv2.imwrite("test.jpg", masked_img)
+                # except: pass
 
                 boxes, counts = process_labels(labels, img.shape)
                 total = sum(counts.values())
@@ -230,14 +218,11 @@ def process_cycle(cycle_uid, model):
     shutil.move(base_path, trash_dest)
     print(f"Moved to TRASH: {cycle_uid}")
 
-
-# ---------------- STABILITY CHECK ---------------- #
 def is_folder_stable(folder):
     size1 = get_size(folder)
     time.sleep(2)
     size2 = get_size(folder)
     return size1 == size2
-
 
 def get_size(folder):
     total = 0
@@ -246,8 +231,6 @@ def get_size(folder):
             total += os.path.getsize(os.path.join(root, f))
     return total
 
-
-# ---------------- MAIN ---------------- #
 def main():
 
     model = MASKRCNN(
@@ -268,6 +251,7 @@ def main():
     while True:
 
         base = os.path.join(TEMP_IMAGE_PATH, LOCATION)
+        print("WAITING FOR DATA")
 
         if not os.path.exists(base):
             time.sleep(2)
@@ -284,7 +268,6 @@ def main():
                 process_cycle(cycle_uid, model)
 
         time.sleep(2)
-
 
 if __name__ == "__main__":
     main()

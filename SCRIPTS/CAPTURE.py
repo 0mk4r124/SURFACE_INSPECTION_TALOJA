@@ -27,7 +27,7 @@ CAMERA_CONFIGS = {
 }
 
 BASE_DIR = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/"
-TEMP_IMAGE_PATH = os.path.join("/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/", "TEMP_IMG/")
+TEMP_IMAGE_PATH = os.path.join("/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/", "RAW_IMG/")
 LOGS_PATH = os.path.join("/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/", "LOGS/")
 
 # Database configuration

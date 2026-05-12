@@ -33,6 +33,7 @@ SERVICES = {
     "Capture": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE.py",
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
+    "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
     # "Capture HUH": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE_HUH.py",
     # "Capture SHOTBLAST": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE_SHOTBLAST.py",
     # "Algorithm": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC_MANAGER.py",
