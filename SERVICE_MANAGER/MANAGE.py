@@ -321,11 +321,11 @@ class ServiceTab(QWidget):
         silence = time.time() - self.last_output_time
         if "Web" in self.name or "Data" in self.name:
             if silence > 60*60*8:  # 8 hours
-                self.append_log("[WATCHDOG] No output for 5 minutes — Restarting...")
+                self.append_log("[WATCHDOG] No output for 8 hours — Restarting...")
                 self.restart_service()
         else:
-            if silence > 360:  # 6 minutes
-                self.append_log("[WATCHDOG] No output for 5 minutes — Restarting...")
+            if silence > 60*60*1:  # 6 minutes
+                self.append_log("[WATCHDOG] No output for 1 hour — Restarting...")
                 self.restart_service()
 
     def open_chrome(self, url="http://127.0.0.1:8000"):

@@ -22,7 +22,7 @@ TRASH_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TAL
 LOCATION = "TALOJA"
 
 PADDING = 50
-ALLOWED_DEFECTS = {"DENT", "VIBRATION", "SILVER_MARK"}
+ALLOWED_DEFECTS = {"D", "V", "S"}
 
 def save_defect_history(cycle_uid, defect_json, defect_str, img_path):
     conn = None
@@ -97,11 +97,11 @@ def process_labels(labels, img_shape):
 
         # normalize + filter
         if "SILVER" in raw_cls:
-            cls = "SILVER_MARK"
+            cls = "S"
         elif "DENT" in raw_cls:
-            cls = "DENT"
+            cls = "D"
         elif "VIBRATION" in raw_cls:
-            cls = "VIBRATION"
+            cls = "V"
         else:
             continue
 
@@ -167,7 +167,7 @@ def process_cycle(cycle_uid, model):
                 continue
 
             try:
-                print(rank)
+                # print(rank)
                 masked_img, labels = model.run_inference(img)
                 # try: cv2.imwrite("test.jpg", masked_img)
                 # except: pass
@@ -236,10 +236,10 @@ def main():
     model = MASKRCNN(
         "taloja",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
         "model_final.pth",
         0.80,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY/TALOJA_MODEL_8MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
         False,
         GPU_ID=0
     )
