@@ -40,6 +40,21 @@ class PLCCOMMINCATION:
             self.init()
 
             return None
+        
+    def read(self, tag):
+        try:
+            value = self.plc.read(tag).value
+            return int(value)
+        
+        except Exception as e:
+            print(f"PLCCOMMINCATION exception in read_bit :{e}")
+            print(traceback.format_exc())
+
+            self.close()
+            time.sleep(1)
+            self.init()
+
+            return None
 
     def write_bit(self, tag, bit, value):
         try:
