@@ -1,8 +1,10 @@
 import os
 import traceback
+import pymssql
 
-from DEPENDANT.LOGIX import PLCCOMMINCATION
+# from DEPENDANT.LOGIX import PLCCOMMINCATION
 from DEPENDANT.LOGGING import initializeLogger
+from DEPENDANT.MQTT import MQTT
 
 
 BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
@@ -13,46 +15,117 @@ logger = initializeLogger("TEST", LOGS_PATH=LOGS_PATH)
 
 FRAME_CAPTURE_SIGNAL = "DataToDeltaPLC"
 
+sql_server_params = {
+    "server": "192.168.1.33",
+    "port": 1433,
+    "user": "saread",
+    "password": "saread",
+    "database": "L2_DAVYSQL"
+}
+
+# =========================
+# CONNECT TO SQL SERVER
+# =========================
+
+def dbconn():
+    conn = None
+    try:
+        conn = pymssql.connect(
+            server=sql_server_params["server"],
+            user=sql_server_params["user"],
+            password=sql_server_params["password"],
+            database=sql_server_params["database"],
+            port=sql_server_params["port"],
+            timeout=5
+        )
+
+        print("Connected successfully")
+
+    except Exception as e:
+        print("Connection failed :", e)
+    
+    return conn
+
 def main():
+    # Create cursor
+    conn = dbconn()
+    cursor = conn.cursor()
 
-    plcobj = PLCCOMMINCATION("192.168.1.13")
-    plcobj.init()
+    # =========================
+    # FETCH DATA
+    # =========================
 
-    while True:
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[0]")
-            print("[0] :", result)
-        except: pass
+    query = "SELECT TOP 10 * FROM VW_BULKER_INSPECTION"
 
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[1]")
-            print("[1] :", result)
-        except: pass
+    cursor.execute(query)
 
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[2]")
-            print("[2] :", result)
-        except: pass
+    # Get column names
+    columns = [desc[0] for desc in cursor.description]
 
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[3]")
-            print("[3] :", result)
-        except: pass
+    print("\nColumns:\n", columns)
+    print("\nData:\n")
 
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[4]")
-            print("[4] :", result)
-        except: pass
+    # Print header
+    print("\t".join(columns))
 
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[5]")
-            print("[5] :", result)
-        except: pass
+    # Print rows
+    for row in cursor.fetchall():
+        print(
+            "\t".join(
+                [str(item) if item is not None else "" for item in row]
+            )
+        )
 
-        try: 
-            result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[6]")
-            print("[6] :", result)
-        except: pass
+    # Close connection
+    cursor.close()
+    conn.close()
+
+    # mq_obj = MQTT("TEST")
+
+    # while True:
+    #     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": "DEMO"})
+    #     mq_obj.publish("taloja/capture", {"action": "stop", "roll_num": "DEMO"})
+
+
+
+    # plcobj = PLCCOMMINCATION("192.168.1.13")
+    # plcobj.init()
+
+    # while True:
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[0]")
+    #         print("[0] :", result)
+    #     except: pass
+
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[1]")
+    #         print("[1] :", result)
+    #     except: pass
+
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[2]")
+    #         print("[2] :", result)
+    #     except: pass
+
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[3]")
+    #         print("[3] :", result)
+    #     except: pass
+
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[4]")
+    #         print("[4] :", result)
+    #     except: pass
+
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[5]")
+    #         print("[5] :", result)
+    #     except: pass
+
+    #     try: 
+    #         result = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[6]")
+    #         print("[6] :", result)
+    #     except: pass
 
 if __name__ == "__main__":
 

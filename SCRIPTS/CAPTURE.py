@@ -39,37 +39,6 @@ db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 save_queue = queue.Queue(maxsize=200_000_000)
 logger = initializeLogger("CAPTURE", LOGS_PATH)
 
-def getdbConn(logger):
-    db = None
-
-    try:
-        db = pymysql.connect(host=db_host, user=db_user, passwd=db_pass, db=db_name)
-    except Exception as e:
-        logger.error(f"SQLClass() Exception is: {e}")
-        logger.error(f"{traceback.format_exc()}")
-
-    return db
-
-def fetchbunchnumber(dbConnection, loc, logger):
-    current_bunch_num = "INACTIVE"
-    cur = None
-
-    try:
-        cur = dbConnection.cursor()
-        query = f"SELECT BUNCH_NUMBER FROM PLC_COMM WHERE LOCATION='{loc}';"
-        cur.execute(query)
-        data = cur.fetchone()
-        current_bunch_num = data[0] if data else 0
-        dbConnection.commit()
-    except Exception as e:
-        logger.critical(f"fetchtrigger() Exception for loc {loc}: {str(e)}")
-        logger.critical(traceback.format_exc())
-    finally:
-        if cur:
-            cur.close()
-
-    return current_bunch_num
-
 def init_cameras(flir, serial_number, result_dict, logger):
     try:
         status, err = flir.initialize(serial_number)
@@ -105,9 +74,7 @@ def process_capture(flir, mq_obj, logger):
     retries = {}
     MAX_RETRIES = 10
     counter = 0
-
-    reciever = MQTT("capture_monitor")
-    reciever.subscribe("taloja/client/capture")
+    
     saver = threading.Thread(target=saver_thread, args=(logger, flir), daemon=True)
     saver.start()
 
@@ -121,58 +88,94 @@ def process_capture(flir, mq_obj, logger):
     while True:
         try:
 
-            data = reciever.data
-            if any(list(data.keys())):
-                action = str(data["roll_num"])
-                roll_num = str(data["roll_num"])
+            data = mq_obj.data
+            if data and data.get("_consumed") is not True:
+                action = data.get("action", "")
+                roll_num = data.get("roll_num", "")
+                mq_obj.data = {**data, "_consumed": True}
 
-            if action == "start":
-                current_roll_num = roll_num
-                logger.info(f"Received start signal for roll {roll_num}, starting acquisition loop")
-                save_path = os.path.join(RAW_PATH, LOCATION, roll_num, cam_serial)
+                if action == "start":
+                    current_roll_num = roll_num
+                    logger.info(f"Received start signal for roll {roll_num}, starting acquisition loop")
+                    save_path = os.path.join(RAW_PATH, LOCATION, roll_num, cam_serial)
+                    os.makedirs(save_path, exist_ok=True)
+
+                    while True:
+                        counter += 1
+
+                        data = mq_obj.data
+                        if data and data.get("_consumed") is not True:
+                            action = data.get("action", "")
+                            roll_num = data.get("roll_num", "")
+                            mq_obj.data = {**data, "_consumed": True}
+
+                        if action == "stop" and roll_num == current_roll_num:
+                            counter = 0
+                            logger.info("Received stop signal, ending acquisition loop")
+                            break
+
+                        for cam_serial, config in CAMERA_CONFIGS.items():
+                            cam = cam_objects[cam_serial]
+
+                            img, err = flir.capture(cam)
+                            if err:
+                                if retries[cam_serial] < MAX_RETRIES:
+                                    retries[cam_serial] += 1
+                                    print(f"{err}")
+                                    logger.error(f"Capture error for camera {cam_serial}: {err}")
+                                    continue
+                                else:
+                                    flir.end_acquisition(cam_serial)
+                                    logger.critical(f"Max retries reached for camera {cam_serial}. Restarting full service...")
+
+                                    # Stop all cameras cleanly before restart
+                                    for cs in list(cam_objects.keys()):
+                                        try: flir.end_acquisition(cs)
+                                        except: pass
+                                        try: flir.deinitialize(cs)
+                                        except: pass
+
+                                    # Raise exception so main() restarts
+                                    raise RuntimeError("Force restart due to max retries")
+                                
+                            save_queue.put((os.path.join(save_path, f"{roll_num}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"), img))
+                            retries[cam_serial] = 0
+
+            else:
+                save_path = os.path.join(TEMP_PATH, LOCATION)
                 os.makedirs(save_path, exist_ok=True)
 
-                while True:
-                    counter += 1
+                for cam_serial, config in CAMERA_CONFIGS.items():
 
-                    data = reciever.data
-                    if any(list(data.keys())):
-                        action = str(data["roll_num"])
-                        roll_num = str(data["roll_num"])
+                    fname = f"{cam_serial}.jpg"
+                    comp_path = os.path.join(save_path, fname)
+                    cam = cam_objects[cam_serial]
 
-                    if action == "stop" and roll_num == current_roll_num:
-                        logger.info("Received stop signal, ending acquisition loop")
-                        break
+                    img, err = flir.capture(cam)
+                    if err:
+                        if  [cam_serial] < MAX_RETRIES:
+                            retries[cam_serial] += 1
+                            print(f"{err}")
+                            logger.error(f"Capture error for camera {cam_serial}: {err}")
+                            continue
+                        else:
+                            flir.end_acquisition(cam_serial)
+                            logger.critical(f"Max retries reached for camera {cam_serial}. Restarting full service...")
 
-                    for cam_serial, config in CAMERA_CONFIGS.items():
+                            # Stop all cameras cleanly before restart
+                            for cs in list(cam_objects.keys()):
+                                try: flir.end_acquisition(cs)
+                                except: pass
+                                try: flir.deinitialize(cs)
+                                except: pass
 
-                        fname = f"{roll_num}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"
-                        comp_path = os.path.join(save_path, fname)
-                        cam = cam_objects[cam_serial]
-
-                        img, err = flir.capture(cam)
-                        if err:
-                            if retries[cam_serial] < MAX_RETRIES:
-                                retries[cam_serial] += 1
-                                print(f"{err}")
-                                logger.error(f"Capture error for camera {cam_serial}: {err}")
-                                continue
-                            else:
-                                flir.end_acquisition(cam_serial)
-                                logger.critical(f"Max retries reached for camera {cam_serial}. Restarting full service...")
-
-                                # Stop all cameras cleanly before restart
-                                for cs in list(cam_objects.keys()):
-                                    try: flir.end_acquisition(cs)
-                                    except: pass
-                                    try: flir.deinitialize(cs)
-                                    except: pass
-
-                                # Raise exception so main() restarts
-                                raise RuntimeError("Force restart due to max retries")
-                            
-                        save_queue.put((comp_path, img))
-                        retries[cam_serial] = 0
+                            # Raise exception so main() restarts
+                            raise RuntimeError("Force restart due to max retries")
+                        
+                    cv2.imwrite(comp_path, img)
+                    retries[cam_serial] = 0
+                    print("Waiting for the trigger")
+                    time.sleep(2)
 
         except Exception as e:
             print(f"process_capture() Exception: {e}")
@@ -180,13 +183,14 @@ def process_capture(flir, mq_obj, logger):
             raise
         
 def main():
-    # mq_obj = MQTT("ABF_CAM")
+    mq_obj = MQTT("DATA_CAPTURE")
+    mq_obj.subscribe("taloja/capture")
     logger.info("Starting main capture manager")
 
     while True:
 
         try:
-            print("Initializing FLIR cameras...")
+            print("Initializing FLIR cameras...") 
             flir = FlirCamera()
             
             for cam_serial, config in CAMERA_CONFIGS.items():
@@ -218,7 +222,7 @@ def main():
 
             # Start capture process
             try:
-                process_capture(flir, None, logger)
+                process_capture(flir, mq_obj, logger)
             except Exception as e:
                 logger.error(f"Capture aborted: {e}")
             finally:
