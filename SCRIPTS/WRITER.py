@@ -1,11 +1,11 @@
 import os
-import logging
-import time
-from logging.handlers import TimedRotatingFileHandler
-from pymodbus.client import ModbusTcpClient
+import timer
 import traceback
 
 from DEPENDANT.MQTT import MQTT
+from
+
+from pymodbus.client import ModbusTcpClient
 
 BASE_DIR = "/home/hindalco_surface_inspection/insightzz/STANDARD_FRAMEWORK/"
 plclogger = None

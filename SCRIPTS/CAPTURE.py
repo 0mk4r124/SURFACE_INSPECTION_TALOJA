@@ -1,24 +1,22 @@
 import cv2
-import logging
 import gc
 import os
 import pymysql
-import sys
 import time
 import threading
 import traceback
 import queue
 
 from datetime import datetime
-from logging.handlers import TimedRotatingFileHandler
 
 from DEPENDANT.FLIR import FlirCamera, PySpin
 from DEPENDANT.MQTT import MQTT
+from DEPENDANT.LOGGING import initializeLogger
 
 LOCATION = "TALOJA"
 CAMERA_CONFIGS = {
     "24521939": {
-        "EXPOSURE": 2600.0, # 2600 exposure set after polarizer installed 
+        "EXPOSURE": 2600.0,
         "FRAME_RATE": 122.0,
         "PACKET_SIZE": 7000,
         "PACKET_DELAY": 10,
@@ -26,17 +24,20 @@ CAMERA_CONFIGS = {
     },
 }
 
-BASE_DIR = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/"
-TEMP_IMAGE_PATH = os.path.join("/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/", "RAW_IMG/")
-LOGS_PATH = os.path.join("/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/", "LOGS/")
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
+
+TEMP_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TEMP_IMG")
+RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
+LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
 
 # Database configuration
-db_user = "root"
-db_pass = "insightzz@123"
-db_host = "127.0.0.1"
-db_name = "ANODES_DB"
+db_user = os.environ.get('db_user', "root")
+db_pass = os.environ.get('db_pass', "insightzz@123")
+db_host = os.environ.get('db_host', "127.0.0.1")
+db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
 save_queue = queue.Queue(maxsize=200_000_000)
+logger = initializeLogger("CAPTURE", LOGS_PATH)
 
 def getdbConn(logger):
     db = None
@@ -48,26 +49,6 @@ def getdbConn(logger):
         logger.error(f"{traceback.format_exc()}")
 
     return db
-
-def initializeLogger(logger_name):
-    logger = None
-
-    try:
-        LOG_BACKUP_COUNT = 2
-        logger = logging.getLogger(logger_name)
-        logger.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        log_file = os.path.join(LOGS_PATH, f"{logger_name}.log")
-        file_handler = TimedRotatingFileHandler(log_file, when='midnight', backupCount=LOG_BACKUP_COUNT)
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        logger.debug(f"Logger initialized for {logger_name}")
-    except Exception as e:
-        print(f"initializeLogger() Exception for {logger_name}: {e}")
-        print(traceback.format_exc())
-
-    return logger
 
 def fetchbunchnumber(dbConnection, loc, logger):
     current_bunch_num = "INACTIVE"
@@ -110,6 +91,7 @@ def saver_thread(logger, flir):
         try:
             # img = flir.converter(img_result)
             cv2.imwrite(path, img)
+            print(f"Saved: {path}")
             if save_queue.qsize() % 100 == 0:
                 logger.debug(f"Background saver queue size: {save_queue.qsize()}")
         except Exception as e:
@@ -122,10 +104,7 @@ def process_capture(flir, mq_obj, logger):
     cam_objects = {}
     retries = {}
     MAX_RETRIES = 10
-    count = 0
-    bunch_num = f"{datetime.now():%Y%m%d_%H%M%S}"
-    curr_time = datetime.now()
-    # datewise = f"{datetime.now():%Y_%m_%d}"
+    counter = 0
 
     reciever = MQTT("capture_monitor")
     reciever.subscribe("taloja/client/capture")
@@ -144,70 +123,56 @@ def process_capture(flir, mq_obj, logger):
 
             data = reciever.data
             if any(list(data.keys())):
-                bunch_num = str(data["value"])
+                action = str(data["roll_num"])
+                roll_num = str(data["roll_num"])
 
-            # if (datetime.now() - curr_time).total_seconds() > 10:
-            #     if bunch_num == 'INACTIVE': 
-            #         bunch_num = f"{datetime.now():%Y%m%d_%H%M%S}"
-            #         curr_time = datetime.now()
-            #         print(f"Saving Bunch: {bunch_num} : count = {count}")
-            #         count = 0
-            #     else: 
-            #         bunch_num = 'INACTIVE'
-            #         curr_time = datetime.now()
+            if action == "start":
+                current_roll_num = roll_num
+                logger.info(f"Received start signal for roll {roll_num}, starting acquisition loop")
+                save_path = os.path.join(RAW_PATH, LOCATION, roll_num, cam_serial)
+                os.makedirs(save_path, exist_ok=True)
 
-            save = bunch_num != "INACTIVE"
-            if not save: time.sleep(2)
-            for cam_serial, config in CAMERA_CONFIGS.items():
+                while True:
+                    counter += 1
 
-                save_path = os.path.join(TEMP_IMAGE_PATH, LOCATION ,bunch_num, cam_serial)
-                fname = f"{bunch_num}_{cam_serial}_{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"
-                comp_path = os.path.join(save_path, fname)
-                cam = cam_objects[cam_serial]
+                    data = reciever.data
+                    if any(list(data.keys())):
+                        action = str(data["roll_num"])
+                        roll_num = str(data["roll_num"])
 
-                img, err = flir.capture(cam)
-                if err:
-                    if retries[cam_serial] < MAX_RETRIES:
-                        retries[cam_serial] += 1
-                        print(f"{err}")
-                        logger.error(f"Capture error for camera {cam_serial}: {err}")
-                        continue
-                    else:
-                        flir.end_acquisition(cam_serial)
-                        logger.critical(f"Max retries reached for camera {cam_serial}. Restarting full service...")
+                    if action == "stop" and roll_num == current_roll_num:
+                        logger.info("Received stop signal, ending acquisition loop")
+                        break
 
-                        # Stop all cameras cleanly before restart
-                        for cs in list(cam_objects.keys()):
-                            try: flir.end_acquisition(cs)
-                            except: pass
-                            try: flir.deinitialize(cs)
-                            except: pass
+                    for cam_serial, config in CAMERA_CONFIGS.items():
 
-                        # Raise exception so main() restarts
-                        raise RuntimeError("Force restart due to max retries")
-                
-                count += 1
-                # if cam_serial == "24027436": img = cv2.flip(img, -1)
-                
-                if save:
-                    # if count > 50:
-                        # print(f"Saving {LOCATION}/{bunch_num}/{cam_serial}")
-                        # mq_obj.publish( f"abf/cam/health",
-                        #     {
-                        #         "loc": "ABF",
-                        #         "status": "ACTIVE"
-                        #     }
-                        # )
-                    os.makedirs(save_path, exist_ok=True)
-                    save_queue.put((comp_path, img))
-                    dtStr = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
-                    print(f"Image Added in Queue : {dtStr}")
-                    # print(f"Saving {LOCATION}/{bunch_num}")
-                else:
-                    print(f"Not saving {LOCATION}/{bunch_num}")
+                        fname = f"{roll_num}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"
+                        comp_path = os.path.join(save_path, fname)
+                        cam = cam_objects[cam_serial]
 
-                retries[cam_serial] = 0
-                # cv2.imwrite("Current.jpg", img)
+                        img, err = flir.capture(cam)
+                        if err:
+                            if retries[cam_serial] < MAX_RETRIES:
+                                retries[cam_serial] += 1
+                                print(f"{err}")
+                                logger.error(f"Capture error for camera {cam_serial}: {err}")
+                                continue
+                            else:
+                                flir.end_acquisition(cam_serial)
+                                logger.critical(f"Max retries reached for camera {cam_serial}. Restarting full service...")
+
+                                # Stop all cameras cleanly before restart
+                                for cs in list(cam_objects.keys()):
+                                    try: flir.end_acquisition(cs)
+                                    except: pass
+                                    try: flir.deinitialize(cs)
+                                    except: pass
+
+                                # Raise exception so main() restarts
+                                raise RuntimeError("Force restart due to max retries")
+                            
+                        save_queue.put((comp_path, img))
+                        retries[cam_serial] = 0
 
         except Exception as e:
             print(f"process_capture() Exception: {e}")
@@ -216,15 +181,7 @@ def process_capture(flir, mq_obj, logger):
         
 def main():
     # mq_obj = MQTT("ABF_CAM")
-    logger = initializeLogger("CAPTURE")
     logger.info("Starting main capture manager")
-
-    # mq_obj.publish( f"abf/cam/health",
-    #     {
-    #         "loc": "ABF",
-    #         "status": "INACTIVE"
-    #     }
-    # )
 
     while True:
 
@@ -264,25 +221,12 @@ def main():
                 process_capture(flir, None, logger)
             except Exception as e:
                 logger.error(f"Capture aborted: {e}")
-                # mq_obj.publish( f"abf/cam/health",
-                #     {
-                #         "loc": "ABF",
-                #         "status": "INACTIVE"
-                #     }
-                # )
             finally:
                 try:
                     flir.release_all()
                     logger.info("Released all cameras")
                 except Exception as ee:
                     logger.error(f"release_all failed: {ee}")
-
-                # mq_obj.publish( f"abf/cam/health",
-                #     {
-                #         "loc": "ABF",
-                #         "status": "INACTIVE"
-                #     }
-                # )
 
                 del flir
                 gc.collect()

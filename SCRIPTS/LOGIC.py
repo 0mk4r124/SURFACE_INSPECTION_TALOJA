@@ -12,14 +12,20 @@ from collections import defaultdict
 from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
 
-# ---------------- CONFIG ---------------- #
-MODEL_DIR = '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/MODEL/'
-
-TEMP_IMAGE_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/RAW_IMG/"
-RESULT_IMAGE_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/RESULT/"
-TRASH_PATH = "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TRASH/"
-
 LOCATION = "TALOJA"
+
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
+
+RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
+RESULT_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RESULT")
+TRASH_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TRASH")
+LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
+
+# Database configuration
+db_user = os.environ.get('db_user', "root")
+db_pass = os.environ.get('db_pass', "insightzz@123")
+db_host = os.environ.get('db_host', "127.0.0.1")
+db_name = os.environ.get('db_name', "ANODES_DB")
 
 PADDING = 50
 ALLOWED_DEFECTS = {"D", "V", "S"}
@@ -30,10 +36,10 @@ def save_defect_history(cycle_uid, defect_json, defect_str, img_path):
 
     try:
         conn = pymysql.connect(
-            host="127.0.0.1",
-            user="root",
-            password="insightzz@123",
-            database="SURFACE_INSPECTION_TALOJA"
+            host= db_host,
+            user= db_user,
+            password= db_pass,
+            database= db_name
         )
 
         cursor = conn.cursor()

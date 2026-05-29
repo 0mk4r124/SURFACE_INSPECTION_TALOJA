@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QTabWidget, QVBoxLayout, QPushButton,
     QPlainTextEdit, QLabel, QHBoxLayout, QMainWindow, QFrame
 )
-from PyQt5.QtCore import QProcess, QTimer
+from PyQt5.QtCore import QProcess, QTimer, QProcessEnvironment
 from PyQt5.QtGui import QFont
 
 from tendo import singleton
@@ -29,19 +29,17 @@ me = singleton.SingleInstance()
 BASE_DIR = Path(__file__).resolve().parent.parent
 BASE_FILE_PATH = BASE_DIR
 
+db_user = "root"
+db_pass = "insightzz@123"
+db_host = "127.0.0.1"
+db_name = "SURFACE_INSPECTION_TALOJA"
+
 SERVICES = {
     "Capture": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE.py",
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
     "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
-    # "Capture HUH": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE_HUH.py",
-    # "Capture SHOTBLAST": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE_SHOTBLAST.py",
-    # "Algorithm": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC_MANAGER.py",
-    # "Trigger HUH": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER_HUH.py",
-    # "Trigger SHOTBLAST": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER_SHOTBLAST.py",
     "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
-    # "Web Mobile": f"{BASE_FILE_PATH}/SCRIPTS/FLASK_SERVER.py",
-    # "Data Sync": f"{BASE_FILE_PATH}/SCRIPTS/DATA_SYNC.py",
     "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
 }
 
@@ -158,6 +156,16 @@ class ServiceTab(QWidget):
 
         # Create process
         self.process = QProcess(self)
+        
+        # Set environment variables for the process
+        env = QProcessEnvironment.systemEnvironment()  # <-- CRITICAL
+        env.insert("BASE_FILE_PATH", BASE_FILE_PATH)
+        env.insert("db_user", db_user)
+        env.insert("db_pass", db_pass)
+        env.insert("db_host", db_host)
+        env.insert("db_name", db_name)
+
+        self.process.setProcessEnvironment(env)
         # merge channels so stdout/stderr come together
         try:
             self.process.setProcessChannelMode(QProcess.MergedChannels)
