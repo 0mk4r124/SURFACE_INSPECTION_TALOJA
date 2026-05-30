@@ -1,49 +1,21 @@
 import os
-import timer
 import traceback
+import time
 
 from DEPENDANT.MQTT import MQTT
-from
+from DEPENDANT.LOGGING import initializeLogger
 
 from pymodbus.client import ModbusTcpClient
 
-BASE_DIR = "/home/hindalco_surface_inspection/insightzz/STANDARD_FRAMEWORK/"
-plclogger = None
-dbConnection = None
-manual_trigger = False
-          
-def initializeLogger():
-     global plclogger
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
 
-     try:
-          ''' Initializing Logger '''
-          LOG_BACKUP_COUNT = 5
-          plclogger = logging.getLogger(__name__)
-          plclogger.setLevel(logging.DEBUG)
-          formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-          
-          # Create a TimedRotatingFileHandler for daily rotation
-          log_file = BASE_DIR + "DEBUGS/LOGS/" + os.path.basename(__file__[:-2])+"log"
-          file_handler = TimedRotatingFileHandler(log_file, when='midnight', backupCount=LOG_BACKUP_COUNT)
-          file_handler.setLevel(logging.DEBUG)
-          file_handler.setFormatter(formatter)
-          plclogger.addHandler(file_handler)
-          plclogger.debug("ANODE TRACKING PLC Module Initialized")
+LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
 
-     except Exception as e:
-          print(f"initializeLogger() Exception is {e}")
-          print(traceback.format_exc())
+plclogger = initializeLogger("WRITER", LOGS_PATH=LOGS_PATH)
 
 class WRITE_REGISTERS:
-    POE_RESTART = 4097
     PLC_WRITE = 4106
     PLC_STOP_LIGHT = 4247
-    COBOT_STOP_FEEDBACK = 4099
-
-class READ_REGISTERS:
-    POE_RESTART = 4097
-    PLC_READ = 4106
-    COBOT_STOP_FEEDBACK = 4099
     
 def initClient():
     client = ModbusTcpClient("192.168.2.5", port=502, timeout=3)
@@ -56,51 +28,51 @@ def writeToPlc(register,val):
         client.write_register(address = register, value = val)
     except Exception as e:
         print(f"WriteToPLC Exception is : {e}")
-        plclogger.error(f"WriteToPLC Exception is : {e}")
+        plclogger.error(f"{traceback.format_exc()}")
 
 def readFromPlc(register):
     client=initClient()
-    result = client.read_holding_registers(address=register, count=2) 
-    result_new = client.read_input_registers(address=register, count=2)  
-    
     value=-1
+
     try:
+        result = client.read_holding_registers(address=register, count=2)
         value=result.getRegister(0)
     except Exception as e:
-        plclogger.error(f"readFromPLC() Exception is {e}")
+        print(f"WriteToPLC Exception is : {e}")
+        plclogger.error(f"{traceback.format_exc()}")
 
     return value
 
-def mainFunction():
-    try:
-        value = 100
-        reciever = MQTT("write_monitor")
-        reciever.subscribe("taloja/client/write")
+def main():
+    mq_obj = MQTT("WRITER")
+    mq_obj.subscribe("taloja/writer")
+    plclogger.info("Starting writer manager")
+
+    print("[PLC_SAMPLER] Ready, waiting for commands …")
         
-        while True:
-            data = reciever.data
-            if any(list(data.keys())):
-                print(data)
-                loc = data['loc']
-                value = int(data["value"])
-                if loc == "stop_light":
-                    writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
-                else:
-                    writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
+    while True:
+        data = mq_obj.data
+        if data and data.get("_consumed") is not True:
 
-                    
-                # print("Value is Written ")
-            # value = readFromPlc(READ_REGISTERS.PLC_READ)
-            # print(f"Value is {value} ")
-            # writeToPlc(WRITE_REGISTERS.PLC_WRITE, 100)
-            # print("Value is Written ")
+            action = data.get("action", "")
+            value = data.get("value")
+            mq_obj.data = {**data, "_consumed": True}
 
-            # time.sleep(0.5)
-            
-    except Exception as e:
-        plclogger.error(f"mainFunction() Inside While Exception is : {e}")
+            if action == "stop_light":
+                writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
+                plclogger.info(f"Writing Stop Light")
+                
+            if action == "diameter":
+                writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
+                plclogger.info(f"Writing Diameter")
+
 
 if __name__=="__main__":
-    initializeLogger()
-    mainFunction()
+    while True:
+        try: main()
+        except:
+            print("Error in main() !")
+            plclogger.critical(f"{traceback.format_exc()}")
+            print("Restarting in 5 secs")
+            time.sleep(5)
     
