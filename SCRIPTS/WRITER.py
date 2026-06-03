@@ -58,13 +58,17 @@ def main():
             value = data.get("value")
             mq_obj.data = {**data, "_consumed": True}
 
-            if action == "stop_light":
+            if action == "light":
                 writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
-                plclogger.info(f"Writing Stop Light")
+                time.sleep(0.5)
+                plclogger.info(f"Writing {value} - Stop Light")
+                print(f"Writing {value} - Stop Light")
                 
             if action == "diameter":
                 writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
+                time.sleep(0.5)
                 plclogger.info(f"Writing Diameter")
+                print(f"Writing Diameter")
 
 
 if __name__=="__main__":

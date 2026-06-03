@@ -16,7 +16,7 @@ from DEPENDANT.LOGGING import initializeLogger
 LOCATION = "TALOJA"
 CAMERA_CONFIGS = {
     "24521939": {
-        "EXPOSURE": 2600.0,
+        "EXPOSURE": 800.0,
         "FRAME_RATE": 122.0,
         "PACKET_SIZE": 7000,
         "PACKET_DELAY": 10,
@@ -36,7 +36,9 @@ db_pass = os.environ.get('db_pass', "insightzz@123")
 db_host = os.environ.get('db_host', "127.0.0.1")
 db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
-save_queue = queue.Queue(maxsize=200_000_000)
+# save_queue = queue.Queue(maxsize=200_000_000)
+# max_threads = 20
+# active_savers = []
 logger = initializeLogger("CAPTURE", LOGS_PATH)
 
 def init_cameras(flir, serial_number, result_dict, logger):
@@ -49,24 +51,62 @@ def init_cameras(flir, serial_number, result_dict, logger):
     except Exception as e:
         result_dict[serial_number] = (False, f"exception during init: {e}\n{traceback.format_exc()}")
 
-def saver_thread(logger, flir):
-    processor = PySpin.ImageProcessor()
-    processor.SetColorProcessing(PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)
+# def saver_thread(logger, flir):
+#     processor = PySpin.ImageProcessor()
+#     processor.SetColorProcessing(PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)
 
-    while True:
-        item = save_queue.get()
-        if item is None: break
-        path, img = item
-        try:
-            # img = flir.converter(img_result)
-            cv2.imwrite(path, img)
-            print(f"Saved: {path}")
-            if save_queue.qsize() % 100 == 0:
-                logger.debug(f"Background saver queue size: {save_queue.qsize()}")
-        except Exception as e:
-            logger.error(f"Save failed: {e}")
-        finally:
-            save_queue.task_done()
+#     while True:
+#         item = save_queue.get()
+#         if item is None: break
+#         path, img = item
+#         try:
+#             # img = flir.converter(img_result)
+#             cv2.imwrite(path, img)
+#             print(f"Saved: {path}")
+#             logger.info(f"Saved: {path}")
+#             if save_queue.qsize() % 100 == 0:
+#                 logger.debug(f"Background saver queue size: {save_queue.qsize()}")
+#         except Exception as e:
+#             logger.error(f"Save failed: {e}")
+#         finally:
+#             save_queue.task_done()
+
+# def start_saver_thread(logger):
+#     thread_id = len(active_savers) + 1
+
+#     t = threading.Thread(
+#         target=saver_thread,
+#         args=(thread_id, logger),
+#         daemon=True
+#     )
+
+#     t.start()
+#     active_savers.append(t)
+
+#     logger.info(f"Started Saver Thread-{thread_id}")
+
+# def queue_monitor(logger):
+#     while True:
+
+#         qsize = save_queue.qsize()
+
+#         # 1 thread per 10 queued images
+#         required_threads = max(1, min(max_threads, (qsize // 10) + 1))
+
+#         current_threads = len(active_savers)
+
+#         if required_threads > current_threads:
+
+#             new_threads = required_threads - current_threads
+
+#             for _ in range(new_threads):
+#                 start_saver_thread(logger)
+
+#             logger.info(
+#                 f"Queue={qsize}, Threads={len(active_savers)}"
+#             )
+
+#         time.sleep(1)
 
 def process_capture(flir, mq_obj, logger):
 
@@ -75,8 +115,8 @@ def process_capture(flir, mq_obj, logger):
     MAX_RETRIES = 10
     counter = 0
     
-    saver = threading.Thread(target=saver_thread, args=(logger, flir), daemon=True)
-    saver.start()
+    # saver = threading.Thread(target=queue_monitor, args=(logger, flir), daemon=True)
+    # saver.start()
 
     for cam_serial, config in CAMERA_CONFIGS.items():
         retries[cam_serial] = 0
@@ -106,13 +146,18 @@ def process_capture(flir, mq_obj, logger):
                         data = mq_obj.data
                         if data and data.get("_consumed") is not True:
                             action = data.get("action", "")
-                            roll_num = data.get("roll_num", "")
-                            diameter = data.get("diameter", "")
-                            mill_speed = data.get("mill_speed", "")
-                            eg_setpoint = data.get("eg_setpoint", "")
-                            width = data.get("width", "")
-                            length = data.get("length", "")
-                            mq_obj.data = {**data, "_consumed": True}
+                            roll_num = data.get("roll_num", roll_num)
+                            diameter = data.get("diameter", 570)
+                            mill_speed = data.get("mill_speed", 0)
+                            eg_setpoint = data.get("eg_setpoint", 0)
+                            width = data.get("width", 0)
+                            length = data.get("length", 0)
+                        else:
+                            diameter = data.get("diameter", 570)
+                            mill_speed = data.get("mill_speed", 0)
+                            eg_setpoint = data.get("eg_setpoint", 0)
+                            width = data.get("width", 0)
+                            length = data.get("length", 0)
 
                         if action == "stop" and roll_num == current_roll_num:
                             counter = 0
@@ -142,8 +187,9 @@ def process_capture(flir, mq_obj, logger):
 
                                     # Raise exception so main() restarts
                                     raise RuntimeError("Force restart due to max retries")
-                                
-                            save_queue.put((os.path.join(save_path, f"{roll_num}__{diameter}_{mill_speed}_{eg_setpoint}_{width}_{length}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"), img))
+
+                            cv2.imwrite(f"{save_path}/{roll_num}__{diameter}_{mill_speed}_{eg_setpoint}_{width}_{length}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg", img)
+                            # save_queue.put((os.path.join(save_path, f"{roll_num}__{diameter}_{mill_speed}_{eg_setpoint}_{width}_{length}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"), img))
                             retries[cam_serial] = 0
 
             else:

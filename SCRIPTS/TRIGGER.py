@@ -40,33 +40,47 @@ def main():
                mill_run = plcobj.read_bit(0, f"{FRAME_CAPTURE_SIGNAL}[10]") 
                ironing_raised = plcobj.read_bit(1, f"{FRAME_CAPTURE_SIGNAL}[10]")
 
-               if mill_run == 1 and diameter > 570:
+               if ((mill_run == 1) or (mill_run == '1')) and diameter > 570:
                     roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
+                    print(f"Trigger recieved - {roll_num}")
+                    time.sleep(2)
 
                     while True:
 
                          diameter = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[0]")
                          mill_speed = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[1]") 
-                         eg_setpoint = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[3]") 
-                         width = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[4]") 
-                         length = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[5]")
+                         eg_setpoint = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[2]") 
+                         width = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[3]") 
+                         length = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[4]")
                          mq_obj.publish("taloja/writer", {"action": "diameter", "value": diameter})
                          mq_obj.publish("taloja/capture", {"diameter": diameter, "mill_speed": mill_speed, "eg_setpoint": eg_setpoint, "width": width, "length": length}) 
 
                          ironing_raised = plcobj.read_bit(1, f"{FRAME_CAPTURE_SIGNAL}[10]")
 
-                         if ironing_raised == 0:
+                         if ironing_raised == 1:
                               mq_obj.publish("taloja/capture", {"action": "stop", "roll_num": roll_num})
-                              mq_obj.publish("taloja/writer", {"action": "stop_light", "value": 0})
+                              mq_obj.publish("taloja/writer", {"action": "light", "value": 1})
                               time.sleep(5)
+                              logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
+                              logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
                               break
+                         else:
+                              mq_obj.publish("taloja/writer", {"action": "light", "value": 0})
 
                          logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                          logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
-                         
+                         # time.sleep(1)
+                        
+               if ironing_raised == 1:
+                    mq_obj.publish("taloja/writer", {"action": "light", "value": 1})
+               if ironing_raised == 0:
+                    mq_obj.publish("taloja/writer", {"action": "light", "value": 0})
+
                logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
+               print(f"diameter = {diameter} | mill_run = {mill_run} | ironing_raised = {ironing_raised}")
+               time.sleep(2)
 
           except Exception as e:
                print(f"Error : {e}")

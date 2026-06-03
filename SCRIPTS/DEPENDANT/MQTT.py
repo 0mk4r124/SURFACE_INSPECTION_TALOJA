@@ -51,7 +51,7 @@ class MQTT:
             if msg.topic in self._queues:
                 self._queues[msg.topic].append(payload)
 
-        print(f"[MQTT-{self.name}] RECEIVED | {msg.topic} | {payload}")
+        # print(f"[MQTT-{self.name}] RECEIVED | {msg.topic} | {payload}")
 
     def publish(self, topic: str, payload: dict, retain: bool = False):
         self.client.publish(topic, json.dumps(payload), retain=retain)

@@ -39,8 +39,8 @@ SERVICES = {
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
     "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
-    "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
-    "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
+    # "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
+    # "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
 }
 
 PYTHON_EXE = sys.executable
@@ -159,7 +159,7 @@ class ServiceTab(QWidget):
         
         # Set environment variables for the process
         env = QProcessEnvironment.systemEnvironment()  # <-- CRITICAL
-        env.insert("BASE_FILE_PATH", BASE_FILE_PATH)
+        env.insert("BASE_FILE_PATH", str(BASE_FILE_PATH))
         env.insert("db_user", db_user)
         env.insert("db_pass", db_pass)
         env.insert("db_host", db_host)

@@ -20,7 +20,7 @@ sql_server_params = {
     "port": 1433,
     "user": "saread",
     "password": "saread",
-    "database": "L2_DAVYSQL"
+    "database": "L2_Davy"
 }
 
 # =========================
@@ -51,39 +51,50 @@ def main():
     conn = dbconn()
     cursor = conn.cursor()
 
-    # =========================
-    # FETCH DATA
-    # =========================
+    # # =========================
+    # # FETCH DATA
+    # # =========================
 
-    query = "SELECT TOP 10 * FROM VW_BULKER_INSPECTION"
-
+    query = "SELECT TOP 10 * FROM VW_LIVE_COIL_DATA"
     cursor.execute(query)
 
-    # Get column names
+    # # Get column names
     columns = [desc[0] for desc in cursor.description]
 
     print("\nColumns:\n", columns)
     print("\nData:\n")
 
-    # Print header
+    # # Print header
     print("\t".join(columns))
 
-    # Print rows
-    for row in cursor.fetchall():
-        print(
-            "\t".join(
-                [str(item) if item is not None else "" for item in row]
-            )
-        )
+    # # Print rows
+    # for row in cursor.fetchall():
+    #     print(
+    #         "\t".join(
+    #             [str(item) if item is not None else "" for item in row]
+    #         )
+    #     )
 
-    # Close connection
+    # # Close connection
     cursor.close()
     conn.close()
 
-    # mq_obj = MQTT("TEST")
+    mq_obj = MQTT("TEST")
+    # diameter, mill_speed, eg_setpoint, width, length = 0, 0, 0, 150, 0
 
     # while True:
     #     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": "DEMO"})
+    #     while True:
+    #         mq_obj.publish("taloja/capture", {"diameter": diameter, "mill_speed": mill_speed, "eg_setpoint": eg_setpoint, "width": width, "length": length}) 
+
+    #         diameter += 1
+    #         mill_speed += 10
+    #         eg_setpoint += 0.05
+    #         length += 100
+
+    #         if length>10000000: break
+            
+
     #     mq_obj.publish("taloja/capture", {"action": "stop", "roll_num": "DEMO"})
 
 
