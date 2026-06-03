@@ -16,7 +16,7 @@ from DEPENDANT.LOGGING import initializeLogger
 LOCATION = "TALOJA"
 CAMERA_CONFIGS = {
     "24521939": {
-        "EXPOSURE": 800.0,
+        "EXPOSURE": 2000.0,
         "FRAME_RATE": 122.0,
         "PACKET_SIZE": 7000,
         "PACKET_DELAY": 10,
