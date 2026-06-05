@@ -9,6 +9,7 @@ import pymysql
 from datetime import datetime
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
@@ -16,10 +17,12 @@ from DEPENDANT.LOGGING import initializeLogger
 
 LOCATION = "TALOJA"
 
-BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
+# /home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA /home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/')
 
 MODEL_DIR = os.path.join(BASE_FILE_PATH, "DEBUGS", "MODEL")
 RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
+TEMP_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TEMP_IMG")
 RESULT_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RESULT")
 TRASH_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TRASH")
 LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
@@ -31,6 +34,7 @@ db_host = os.environ.get('db_host', "127.0.0.1")
 db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
 PADDING = 50
+summary_lock = Lock()
 ALLOWED_DEFECTS = {"D", "V", "S"}
 
 logger = initializeLogger("LOGIC", LOGS_PATH=LOGS_PATH)
@@ -50,35 +54,67 @@ def getDBconn():
 
     return conn
 
-def save_defect_history(conn, cycle_uid, defect_json, defect_str, img_path):
+def save_defect_history(conn, cycle_uid, defect_details, img_path, json_path):
     cursor = None
 
     try:
         cursor = conn.cursor()
 
-        query = """
-            INSERT INTO DEFECTS_HISTORY 
-            (CYCLE_UID, DEFECT_DETAIL, DEFECT_STR, IMG_PATH, CREATE_TIME)
-            VALUES (%s, %s, %s, %s, %s)
+        # Check if record exists
+        check_query = """
+            SELECT 1
+            FROM DEFECTS_HISTORY
+            WHERE CYCLE_UID = %s
+            LIMIT 1
         """
 
-        cursor.execute(query, (
-            cycle_uid,
-            json.dumps(defect_json),
-            defect_str.replace('_', ','),
-            img_path,
-            datetime.now()
-        ))
+        cursor.execute(check_query, (cycle_uid,))
+        record_exists = cursor.fetchone() is not None
+
+        if record_exists:
+
+            update_query = """
+                UPDATE DEFECTS_HISTORY
+                SET DEFECT_DETAILS = %s,
+                    IMG_PATH = %s,
+                    JSON_PATH = %s,
+                    CREATE_TIME = %s
+                WHERE CYCLE_UID = %s
+            """
+
+            cursor.execute(update_query, (
+                defect_details,
+                img_path,
+                json_path,
+                datetime.now(),
+                cycle_uid
+            ))
+
+        else:
+
+            insert_query = """
+                INSERT INTO DEFECTS_HISTORY
+                (CYCLE_UID, DEFECT_DETAILS, IMG_PATH, JSON_PATH, CREATE_TIME)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+
+            cursor.execute(insert_query, (
+                cycle_uid,
+                defect_details,
+                img_path,
+                json_path,
+                datetime.now()
+            ))
 
         conn.commit()
 
     except Exception as e:
         print(f"DB Error: {e}")
-        logger.error(f"{json.dumps(defect_json)}")
         logger.error(f"{traceback.format_exc()}")
 
     finally:
-        if cursor: cursor.close()
+        if cursor:
+            cursor.close()
 
 def get_sorted_images(folder):
     files = [
@@ -163,19 +199,24 @@ def add_summary(img, counts, severity):
 
     return img
 
-def process_images(cycle_uid, cam_path, image_items, model):
+def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_summary, mq_obj):
+    defect_json, counts = {}, {}
     date_str = datetime.now().strftime('%Y%m%d')
-    conn = getDBconn()
 
     for rank, image_name in image_items:
         try:
-            print(rank)
             img_path = os.path.join(cam_path, image_name)
+
+            diameter = (image_name.split("__")[1]).split("_")[0]
+            eg_setpoint = (image_name.split("__")[1]).split("_")[2]
+            distance = (image_name.split("__")[1]).split("_")[4]
+
             img = cv2.imread(img_path)
             if img is None:
                 continue
             try:
                 masked_img, labels = model.run_inference(img)
+
                 boxes, counts = process_labels(labels, img.shape)
                 total = sum(counts.values())
                 severity = calculate_severity(total)
@@ -187,36 +228,45 @@ def process_images(cycle_uid, cam_path, image_items, model):
                 if total > 0:
                     folder = "DEFECT"
                     defect_str = "_".join([f"{k}{v}" for k, v in counts.items()])
-                    new_name = f"{rank}_{defect_str}_{image_name}"
+                    new_name = f"{rank}_{distance}_{defect_str}.jpg"
+
+                    with summary_lock:
+                        defect_summary["processed_at"] = datetime.now().isoformat()
+                        defect_summary["defect_frames"] = severity
+                        defect_summary["severity"] = severity
+                        defect_summary["distance"] = distance
+                        defect_summary["S"] += counts.get("S", 0)
+                        defect_summary["D"] += counts.get("D", 0)
+                        defect_summary["V"] += counts.get("V", 0)
+                        defect_summary["total_defects"] += counts.get("V", 0) + counts.get("S", 0) + counts.get("D", 0)
+                        mq_obj.publish("main/logic", defect_summary)
                 else:
                     folder = "NODEFECT"
                     defect_str = "NODEFECT"
-                    new_name = f"{rank}_{image_name}"
+                    new_name = f"{rank}_{distance}.jpg"
+
+                    with summary_lock:
+                        defect_summary["processed_at"] = datetime.now().isoformat()
+                        defect_summary["severity"] = severity
+                        defect_summary["distance"] = distance
+                        mq_obj.publish("main/logic", defect_summary)
 
                 save_dir = os.path.join(RESULT_PATH, date_str, cycle_uid, folder)
                 os.makedirs(save_dir, exist_ok=True)
                 save_path = os.path.join(save_dir, f"{new_name}.jpg")
                 cv2.imwrite(save_path, annotated)
+                cv2.imwrite(f"{TEMP_PATH}/{LOCATION}/{cam_serial}_debug.jpg", annotated)
 
                 defect_json = {
                     "r": rank,
+                    "d": diameter,
+                    "e": eg_setpoint,
+                    "l": distance,
                     "s": severity,
                     **boxes,
                     "t": counts,
                 }
-                # ? SAVE TO DEFECTS_HISTORY / DB
-                save_defect_history(conn, cycle_uid, defect_json, defect_str, save_path)
 
-
-                # results.append((rank, {
-                #     "annotated": annotated,
-                #     "counts": counts,
-                #     "severity": severity,
-                #     "boxes": boxes,
-                #     "defect_str": defect_str,
-                #     "new_name": new_name,
-                #     "folder": folder,
-                # }))
             except Exception as e:
                 print(f"Error processing {image_name}: {e}")
                 logger.error(f"{traceback.format_exc()}")
@@ -224,14 +274,24 @@ def process_images(cycle_uid, cam_path, image_items, model):
         except Exception as e:
             print(f"Error processing {image_name}: {e}")
 
-    return True
+    return defect_json
 
-def process_cycle(cycle_uid, model_1, model_2):
+def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
+    date_str = datetime.now().strftime('%Y%m%d')
+    conn = getDBconn()
     if not os.path.exists(base_path):
         return
+    
     print(f"\nProcessing cycle: {cycle_uid}")
-    cycle_totals = defaultdict(int)
+    results = []
+    defect_summary = {
+        "cycle_uid": cycle_uid,
+        "total_frames": 0,
+        "total_defects": 0,
+        "defect_frames": 0,
+        "D": 0, "V": 0, "S":0,
+    }
 
     for cam_serial in os.listdir(base_path):
         cam_path = os.path.join(base_path, cam_serial)
@@ -244,12 +304,62 @@ def process_cycle(cycle_uid, model_1, model_2):
         second_half = ranked_images[mid:]
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(process_images, cycle_uid, cam_path, first_half,  model_1)
-            future_2 = executor.submit(process_images, cycle_uid, cam_path, second_half, model_2)
+            future_1 = executor.submit(process_images, cycle_uid, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj)
+            future_2 = executor.submit(process_images, cycle_uid, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj)
+            
             results_1 = future_1.result()
+            results.append(results_1)
+            
             results_2 = future_2.result()
+            results.append(results_2)
 
     print(f"Cycle Done")
+
+    defect_json = {
+        "cycle_uid": cycle_uid,
+        "result": results
+    }
+
+    json_dir = os.path.join(RESULT_PATH, date_str, cycle_uid)
+    os.makedirs(json_dir, exist_ok=True)
+    json_path = os.path.join(json_dir, f"{cycle_uid}_defect_data.json")
+
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r") as f:
+                existing_data = json.load(f)
+
+            # If "result" is a list, append new results
+            if isinstance(existing_data.get("result"), list) and isinstance(results, list):
+                existing_data["result"].extend(results)
+            else:
+                # Otherwise overwrite/update
+                existing_data["result"] = results
+
+            with open(json_path, "w") as f:
+                json.dump(existing_data, f, indent=4)
+
+            print("Existing JSON updated successfully.")
+
+        except Exception as e:
+            print(f"Failed to update JSON: {e}")
+
+    else:
+        with open(json_path, "w") as f:
+            json.dump(defect_json, f, indent=4)
+
+    print("New JSON file created successfully.")
+
+    img_dir = os.path.join(RESULT_PATH, date_str, cycle_uid)
+    # save_defect_history(conn, cycle_uid, json.dumps(defect_summary), img_dir, json_path)
+
+    defect_summary = {
+        "cycle_uid": "",
+        "total_frames": 0,
+        "total_defects": 0,
+        "defect_frames": 0,
+        "D": 0, "V": 0, "S":0,
+    }
 
     # ---- MOVE TO TRASH ---- #
     trash_dest = os.path.join(TRASH_PATH, cycle_uid)
@@ -274,10 +384,10 @@ def main():
     model_1 = MASKRCNN(
         "taloja1",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY"),
         "model_final.pth",
         0.90,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY/TALOJA_MODEL_8MAY.json"),
         False,
         GPU_ID=0
     )
@@ -285,17 +395,15 @@ def main():
     model_2 = MASKRCNN(
         "taloja2",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY"),
         "model_final.pth",
         0.90,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY/TALOJA_MODEL_8MAY.json"),
         False,
         GPU_ID=0
     )
 
-    reciever = MQTT("capture_monitor")
-    reciever.subscribe("taloja/client/capture")
-    bunch_num = 'INACTIVE'
+    mq_obj = MQTT("capture_monitor")
 
     while True:
 
@@ -307,14 +415,10 @@ def main():
             continue
 
         for cycle_uid in os.listdir(base):
-
-            try: data = reciever.data
-            except: data = {}
-            if any(list(data.keys())):
-                bunch_num = str(data["value"])
-
-            if bunch_num != cycle_uid:
-                process_cycle(cycle_uid, model_1, model_2)
+            while True:
+                if len(os.listdir(os.path.join(base, cycle_uid))) > 0: 
+                    process_cycle(cycle_uid, model_1, model_2, mq_obj)
+                else: break
 
         time.sleep(2)
 

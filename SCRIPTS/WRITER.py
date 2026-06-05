@@ -51,24 +51,33 @@ def main():
     print("[PLC_SAMPLER] Ready, waiting for commands …")
         
     while True:
-        data = mq_obj.data
-        if data and data.get("_consumed") is not True:
+        try:
+            data = mq_obj.data
 
-            action = data.get("action", "")
-            value = data.get("value")
-            mq_obj.data = {**data, "_consumed": True}
+            if data and data.get("_consumed") is not True:
+                mq_obj.publish("taloja/health_check", {"module": "writer", "status": "Active"})
 
-            if action == "light":
-                writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
-                time.sleep(0.5)
-                plclogger.info(f"Writing {value} - Stop Light")
-                print(f"Writing {value} - Stop Light")
-                
-            if action == "diameter":
-                writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
-                time.sleep(0.5)
-                plclogger.info(f"Writing Diameter")
-                print(f"Writing Diameter")
+                action = data.get("action", "")
+                value = data.get("value")
+                mq_obj.data = {**data, "_consumed": True}
+
+                if action == "light":
+                    writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
+                    time.sleep(0.5)
+                    plclogger.info(f"Writing {value} - Stop Light")
+                    print(f"Writing {value} - Stop Light")
+                    
+                if action == "diameter":
+                    writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
+                    time.sleep(0.5)
+                    plclogger.info(f"Writing Diameter")
+                    print(f"Writing Diameter")
+
+        except Exception as e:
+            mq_obj.publish("taloja/health_check", {"module": "writer", "status": "Inactive", "error": f"{e}"})
+            print(f"process_capture() Exception: {e}")
+            plclogger.error(traceback.format_exc())
+            raise
 
 
 if __name__=="__main__":

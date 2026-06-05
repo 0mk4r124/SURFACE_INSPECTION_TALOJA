@@ -41,7 +41,7 @@ db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 # active_savers = []
 logger = initializeLogger("CAPTURE", LOGS_PATH)
 
-def init_cameras(flir, serial_number, result_dict, logger):
+def init_cameras(flir, serial_number, result_dict, mq_obj):
     try:
         status, err = flir.initialize(serial_number)
         if not status:
@@ -49,64 +49,8 @@ def init_cameras(flir, serial_number, result_dict, logger):
             return
         result_dict[serial_number] = (True, None)
     except Exception as e:
+        mq_obj.publish("taloja/health_check", {"module": "cam", "status": "Inactive", "error": f"{e}"})
         result_dict[serial_number] = (False, f"exception during init: {e}\n{traceback.format_exc()}")
-
-# def saver_thread(logger, flir):
-#     processor = PySpin.ImageProcessor()
-#     processor.SetColorProcessing(PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)
-
-#     while True:
-#         item = save_queue.get()
-#         if item is None: break
-#         path, img = item
-#         try:
-#             # img = flir.converter(img_result)
-#             cv2.imwrite(path, img)
-#             print(f"Saved: {path}")
-#             logger.info(f"Saved: {path}")
-#             if save_queue.qsize() % 100 == 0:
-#                 logger.debug(f"Background saver queue size: {save_queue.qsize()}")
-#         except Exception as e:
-#             logger.error(f"Save failed: {e}")
-#         finally:
-#             save_queue.task_done()
-
-# def start_saver_thread(logger):
-#     thread_id = len(active_savers) + 1
-
-#     t = threading.Thread(
-#         target=saver_thread,
-#         args=(thread_id, logger),
-#         daemon=True
-#     )
-
-#     t.start()
-#     active_savers.append(t)
-
-#     logger.info(f"Started Saver Thread-{thread_id}")
-
-# def queue_monitor(logger):
-#     while True:
-
-#         qsize = save_queue.qsize()
-
-#         # 1 thread per 10 queued images
-#         required_threads = max(1, min(max_threads, (qsize // 10) + 1))
-
-#         current_threads = len(active_savers)
-
-#         if required_threads > current_threads:
-
-#             new_threads = required_threads - current_threads
-
-#             for _ in range(new_threads):
-#                 start_saver_thread(logger)
-
-#             logger.info(
-#                 f"Queue={qsize}, Threads={len(active_savers)}"
-#             )
-
-#         time.sleep(1)
 
 def process_capture(flir, mq_obj, logger):
 
@@ -189,6 +133,9 @@ def process_capture(flir, mq_obj, logger):
                                     raise RuntimeError("Force restart due to max retries")
 
                             cv2.imwrite(f"{save_path}/{roll_num}__{diameter}_{mill_speed}_{eg_setpoint}_{width}_{length}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg", img)
+                            if counter%100 == 0: 
+                                cv2.imwrite(f"{TEMP_PATH}/{LOCATION}/{cam_serial}.jpg", img)
+                                mq_obj.publish("taloja/health_check", {"module": "cam", "status": "Active"})
                             # save_queue.put((os.path.join(save_path, f"{roll_num}__{diameter}_{mill_speed}_{eg_setpoint}_{width}_{length}__{counter}__{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"), img))
                             retries[cam_serial] = 0
 
@@ -226,14 +173,16 @@ def process_capture(flir, mq_obj, logger):
                     cv2.imwrite(comp_path, img)
                     retries[cam_serial] = 0
                     print("Waiting for the trigger")
+                    mq_obj.publish("taloja/health_check", {"module": "cam", "status": "Active"})
                     time.sleep(2)
 
         except Exception as e:
+            mq_obj.publish("taloja/health_check", {"module": "cam", "status": "Inactive", "error": f"{e}"})
             print(f"process_capture() Exception: {e}")
             logger.error(traceback.format_exc())
             raise
         
-def main():
+def main(mq_obj):
     mq_obj = MQTT("DATA_CAPTURE")
     mq_obj.subscribe("taloja/capture")
     logger.info("Starting main capture manager")
@@ -241,6 +190,9 @@ def main():
     while True:
 
         try:
+
+            mq_obj.publish("taloja/health_check", {"module": "cam", "status": "Initialising"})
+
             print("Initializing FLIR cameras...") 
             flir = FlirCamera()
             
@@ -251,7 +203,7 @@ def main():
 
             init_results = {}
             for cam_serial, config in CAMERA_CONFIGS.items():
-                init_cameras(flir, cam_serial, init_results, logger)
+                init_cameras(flir, cam_serial, init_results, mq_obj)
 
             working_cams = [s for s, res in init_results.items() if res[0]]
             print(f"Camera initialization results: {working_cams}")
@@ -291,7 +243,8 @@ def main():
             continue
 
         except Exception as e:
-            print(f"Outer loop {e}")
+            mq_obj.publish("taloja/health_check", {"module": "cam", "status": "Inactive", "error": f"{e}"})
+            print(f"Outer loop error: {e}")
             logger.error(traceback.format_exc())
 
         # time.sleep(2)

@@ -5,13 +5,20 @@ import subprocess
 import shlex
 import sys
 import time
+import cv2
+
+import numpy as np
+
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QTabWidget, QVBoxLayout, QPushButton,
-    QPlainTextEdit, QLabel, QHBoxLayout, QMainWindow, QFrame
+    QPlainTextEdit, QLabel, QHBoxLayout, QMainWindow, QFrame,
+    QGridLayout, QGroupBox, QSizePolicy, QScrollArea
 )
-from PyQt5.QtCore import QProcess, QTimer, QProcessEnvironment
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import QProcess, QTimer, QProcessEnvironment, Qt
+from PyQt5.QtGui import QFont, QPixmap, QImage
+
+from DEPENDANT.MQTT import MQTT
 
 from tendo import singleton
 me = singleton.SingleInstance()
@@ -57,7 +64,6 @@ def set_status_color(label: QLabel, status: str, name: str = ""):
     else:
         label.setStyleSheet("color: gray; font-weight: bold;")
     label.setText(f"{name}: {status}")
-
 
 class ServiceTab(QWidget):
     def __init__(self, name, command):
@@ -344,38 +350,206 @@ class ServiceTab(QWidget):
         except Exception as e:
             self.append_log(f"[ERROR] Could not open Chrome: {e}")
 
-
 class DashboardTab(QWidget):
+
+    TEMP_IMG_PATH   = str(BASE_FILE_PATH) + "/DEBUGS/TEMP_IMG/TALOJA/24521939.jpg"
+    LOGIC_IMG_PATH   = str(BASE_FILE_PATH) + "/DEBUGS/TEMP_IMG/TALOJA/24521939_debug.jpg"
+
+    MQTT_TRIGGER = "main/trigger"
+    MQTT_LOGIC   = "main/logic"
+
     def __init__(self, service_tabs):
         super().__init__()
         self.service_tabs = service_tabs
 
-        layout = QVBoxLayout()
-        self.disk_label = QLabel("Disk: -- | Free: --")
-        layout.addWidget(self.disk_label)
+        # ── MQTT listener ──────────────────────────────────────────────────────
+        self._mqtt = MQTT("main_capture")
+        self._mqtt.subscribe(self.MQTT_TRIGGER)
+        self._mqtt.subscribe(self.MQTT_LOGIC)
 
-        # Divider line
+        # ── root layout: top status bar  +  two columns ───────────────────────
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(6)
+
+        # ── top bar: disk + service statuses (original content, preserved) ────
+        top_bar = QHBoxLayout()
+
+        self.disk_label = QLabel("Disk: -- | Free: --")
+        self.disk_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        top_bar.addWidget(self.disk_label)
+
+        top_bar.addStretch()
+
+        # self.status_labels = {}
+        # for name in service_tabs:
+        #     lbl = QLabel(f"{name}: Inactive")
+        #     set_status_color(lbl, "Inactive", name)
+        #     lbl.setStyleSheet(lbl.styleSheet() + " font-size: 11px; margin-left: 12px;")
+        #     top_bar.addWidget(lbl)
+        #     self.status_labels[name] = lbl
+
+        root.addLayout(top_bar)
+
+        # thin divider
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(line)
+        line.setStyleSheet("color: #444;")
+        root.addWidget(line)
 
-        # Service statuses
-        self.status_labels = {}
-        for name in service_tabs:
-            lbl = QLabel(f"{name}: Inactive")
-            set_status_color(lbl, "Inactive", name)
-            layout.addWidget(lbl)
-            self.status_labels[name] = lbl
+        # ── two-column body ────────────────────────────────────────────────────
+        cols = QHBoxLayout()
+        cols.setSpacing(10)
+        cols.addWidget(self._build_left_panel(),  stretch=1)
+        cols.addWidget(self._build_right_panel(), stretch=1)
+        root.addLayout(cols)
 
-        self.setLayout(layout)
-
-        # Timer to update info
+        # ── timers ─────────────────────────────────────────────────────────────
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_dashboard)
-        self.timer.start(3000)
+        self.timer.start(1000)          # 1 s — matches requirement
+
+    # ── panel builders ─────────────────────────────────────────────────────────
+
+    def _panel(self, title):
+        """Styled QGroupBox used for both panels."""
+        gb = QGroupBox(title)
+        gb.setStyleSheet(
+            "QGroupBox { color: #aaa; font-size: 10px; font-weight: bold; "
+            "  border: 1px solid #444; border-radius: 6px; "
+            "  margin-top: 8px; padding-top: 4px; background: #252526; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
+        )
+        return gb
+
+    def _cam_frame(self):
+        """Black placeholder label used as a camera image display."""
+        lbl = QLabel()
+        lbl.setFixedHeight(200)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("background: #111; border-radius: 4px; color: #555; font-size: 11px;")
+        lbl.setText("No image")
+        lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        return lbl
+
+    def _kv_row(self, grid, row, key, value_text="—", value_color="#e0e0e0"):
+        """Add a key-value pair row to a QGridLayout, return the value label."""
+        k = QLabel(key.upper())
+        k.setStyleSheet("color: #777; font-size: 10px; font-weight: bold; background: transparent;")
+        v = QLabel(value_text)
+        v.setStyleSheet(f"color: {value_color}; font-size: 12px; font-weight: bold; background: transparent;")
+        grid.addWidget(k, row, 0)
+        grid.addWidget(v, row, 1)
+        return v
+
+    def _build_left_panel(self):
+        panel = self._panel("Trigger — Live")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(8)
+
+        # Camera image
+        self.left_cam = self._cam_frame()
+        layout.addWidget(self.left_cam)
+
+        # Coil ID — big, amber, most prominent
+        coil_box = QFrame()
+        coil_box.setStyleSheet("background: #1a1400; border: 1px solid #8a6000; border-radius: 5px; padding: 4px;")
+        coil_layout = QHBoxLayout(coil_box)
+        coil_layout.setContentsMargins(8, 4, 8, 4)
+        coil_lbl = QLabel("COIL / ROLL")
+        coil_lbl.setStyleSheet("color: #888; font-size: 10px; font-weight: bold; background: transparent;")
+        self.left_roll = QLabel("—")
+        self.left_roll.setStyleSheet("color: #ffb300; font-size: 16px; font-weight: bold; background: transparent;")
+        self.left_roll.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        coil_layout.addWidget(coil_lbl)
+        coil_layout.addStretch()
+        coil_layout.addWidget(self.left_roll)
+        layout.addWidget(coil_box)
+
+        # Trigger details grid
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        grid.setColumnMinimumWidth(0, 110)
+        self.t_diameter  = self._kv_row(grid, 0, "Diameter")
+        self.t_speed     = self._kv_row(grid, 1, "Mill Speed")
+        self.t_eg        = self._kv_row(grid, 2, "EG Setpoint")
+        self.t_width     = self._kv_row(grid, 3, "Width")
+        self.t_length    = self._kv_row(grid, 4, "Length")
+        self.t_mill_run  = self._kv_row(grid, 5, "Mill Run",  value_color="#aaa")
+        self.t_ironing   = self._kv_row(grid, 6, "Ironing Raised", value_color="#aaa")
+        self.t_status    = self._kv_row(grid, 7, "Capture Status", value_color="#aaa")
+        layout.addLayout(grid)
+        layout.addStretch()
+
+        return panel
+
+    def _build_right_panel(self):
+        panel = self._panel("Logic — Defect Summary")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(8)
+
+        # Camera image (last result)
+        self.right_cam = self._cam_frame()
+        layout.addWidget(self.right_cam)
+
+        # Coil ID — same amber treatment
+        coil_box = QFrame()
+        coil_box.setStyleSheet("background: #1a1400; border: 1px solid #8a6000; border-radius: 5px; padding: 4px;")
+        coil_layout = QHBoxLayout(coil_box)
+        coil_layout.setContentsMargins(8, 4, 8, 4)
+        coil_lbl = QLabel("COIL / ROLL")
+        coil_lbl.setStyleSheet("color: #888; font-size: 10px; font-weight: bold; background: transparent;")
+        self.right_roll = QLabel("—")
+        self.right_roll.setStyleSheet("color: #ffb300; font-size: 16px; font-weight: bold; background: transparent;")
+        self.right_roll.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        coil_layout.addWidget(coil_lbl)
+        coil_layout.addStretch()
+        coil_layout.addWidget(self.right_roll)
+        layout.addWidget(coil_box)
+
+        # Severity — large colored badge
+        sev_box = QFrame()
+        sev_box.setStyleSheet("background: #1a1a1a; border: 1px solid #444; border-radius: 5px;")
+        sev_layout = QHBoxLayout(sev_box)
+        sev_layout.setContentsMargins(8, 4, 8, 4)
+        sev_lbl = QLabel("SEVERITY")
+        sev_lbl.setStyleSheet("color: #888; font-size: 10px; font-weight: bold; background: transparent;")
+        self.r_severity = QLabel("—")
+        self.r_severity.setStyleSheet("color: #aaa; font-size: 15px; font-weight: bold; background: transparent;")
+        self.r_severity.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        sev_layout.addWidget(sev_lbl)
+        sev_layout.addStretch()
+        sev_layout.addWidget(self.r_severity)
+        layout.addWidget(sev_box)
+
+        # Defect counts grid
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        grid.setColumnMinimumWidth(0, 110)
+        self.r_total   = self._kv_row(grid, 0, "Total Defects", value_color="#f44336")
+        self.r_dent    = self._kv_row(grid, 1, "Dent (D)",      value_color="#ef9a9a")
+        self.r_vibr    = self._kv_row(grid, 2, "Vibration (V)", value_color="#90caf9")
+        self.r_silv    = self._kv_row(grid, 3, "Silver (S)",    value_color="#ffcc80")
+        self.r_frames  = self._kv_row(grid, 4, "Total Frames")
+        self.r_dframes = self._kv_row(grid, 5, "Defect Frames", value_color="#ef9a9a")
+        self.r_proc_at = self._kv_row(grid, 6, "Processed At",  value_color="#aaa")
+        layout.addLayout(grid)
+        layout.addStretch()
+
+        return panel
+
+    # ── update (called every 1 s) ───────────────────────────────────────────────
 
     def update_dashboard(self):
+        self._update_top_bar()
+        self._update_left()
+        self._update_right()
+
+    def _update_top_bar(self):
+        # Disk
         root_path = "/" if os.name != "nt" else "C:\\"
         try:
             usage = psutil.disk_usage(root_path)
@@ -385,10 +559,114 @@ class DashboardTab(QWidget):
         except Exception as e:
             self.disk_label.setText(f"Disk: error ({e})")
 
-        for name, tab in self.service_tabs.items():
-            status = tab.status_label.text().replace(f"{name}: ", "")
-            set_status_color(self.status_labels[name], status, name)
+        # Service statuses — original logic, unchanged
+        # for name, tab in self.service_tabs.items():
+        #     status = tab.status_label.text().replace(f"{name}: ", "").replace("Status: ", "")
+        #     set_status_color(self.status_labels[name], status, name)
 
+    def _load_image(self, path, label):
+        try:
+            if not os.path.isfile(path):
+                label.setText("No image")
+                return
+            img = cv2.imread(path)
+            if img is None:
+                label.setText("Unreadable")
+                return
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            h, w, ch = img.shape
+            qt_img = QImage(img.data, w, h, ch * w, QImage.Format_RGB888)
+            pix = QPixmap.fromImage(qt_img).scaled(
+                label.width() or 480, label.height(),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            label.setPixmap(pix)
+            label.setText("")
+        except Exception:
+            label.setText("Load error")
+
+    def _find_latest_result_image(self):
+        """Walk RESULT_PATH and return the most recently modified .jpg."""
+        try:
+            best_t, best_p = 0, None
+            for root, _, files in os.walk(self.RESULT_IMG_PATH):
+                for f in files:
+                    if f.lower().endswith(".jpg"):
+                        p = os.path.join(root, f)
+                        t = os.path.getmtime(p)
+                        if t > best_t:
+                            best_t, best_p = t, p
+            return best_p
+        except Exception:
+            return None
+
+    def _update_left(self):
+        # Live temp image
+        self._load_image(self.TEMP_IMG_PATH, self.left_cam)
+
+        # MQTT data from TRIGGER / CAPTURE
+        d = self._mqtt.pop(self.MQTT_TRIGGER)
+
+        if d:
+
+            roll = d.get("roll_num") or d.get("roll_id") or "—"
+            self.left_roll.setText(roll)
+
+            self.t_diameter.setText(f"{d.get('diameter', '—')} mm"  if d.get('diameter') is not None else "—")
+            self.t_speed.setText(f"{d.get('mill_speed', '—')} rpm"  if d.get('mill_speed') is not None else "—")
+            self.t_eg.setText(str(d.get('eg_setpoint', '—')))
+            self.t_width.setText(f"{d.get('width', '—')} mm"        if d.get('width') is not None else "—")
+            self.t_length.setText(f"{d.get('length', '—')} m"       if d.get('length') is not None else "—")
+
+            # mill_run / ironing
+            mill_run = d.get("mill_run")
+            ironing  = d.get("ironing_raised")
+            self.t_mill_run.setText("● RUNNING" if mill_run in (1, "1", True) else "○ STOPPED")
+            self.t_mill_run.setStyleSheet(
+                f"color: {'lightgreen' if mill_run in (1, '1', True) else '#f44336'}; "
+                "font-size: 12px; font-weight: bold; background: transparent;"
+            )
+            self.t_ironing.setText("● RAISED" if ironing in (1, "1", True) else "○ DOWN")
+            self.t_ironing.setStyleSheet(
+                f"color: {'#ffb300' if ironing in (1, '1', True) else '#aaa'}; "
+                "font-size: 12px; font-weight: bold; background: transparent;"
+            )
+
+            action = d.get("action", "")
+            self.t_status.setText(action.upper() if action else "IDLE")
+            self.t_status.setStyleSheet(
+                f"color: {'lightgreen' if action == 'start' else ('#f44336' if action == 'stop' else '#aaa')}; "
+                "font-size: 12px; font-weight: bold; background: transparent;"
+            )
+
+    def _update_right(self):
+        # Latest result image
+        self._load_image(self.LOGIC_IMG_PATH, self.right_cam)
+
+        # MQTT data from LOGIC
+        d = self._mqtt.pop(self.MQTT_LOGIC)
+
+        if d:
+            roll = d.get("cycle_uid") or d.get("roll_num") or "—"
+            self.right_roll.setText(roll)
+
+            total  = d.get("total_defects", 0)
+            sev    = d.get("severity", "LOW")
+
+            sev_color = {"HIGH": "#f44336", "MEDIUM": "#ffb300", "LOW": "lightgreen"}.get(sev, "#aaa")
+            self.r_severity.setText(sev)
+            self.r_severity.setStyleSheet(
+                f"color: {sev_color}; font-size: 15px; font-weight: bold; background: transparent;"
+            )
+
+            self.r_total.setText(str(total) if total is not None else "—")
+            self.r_dent.setText(str(d.get("D", "—")))
+            self.r_vibr.setText(str(d.get("V", "—")))
+            self.r_silv.setText(str(d.get("S", "—")))
+            self.r_frames.setText(str(d.get("total_frames", "—")))
+            self.r_dframes.setText(str(d.get("defect_frames", "—")))
+            proc_at = d.get("processed_at", "")
+            self.r_proc_at.setText(proc_at[:19] if proc_at else "—")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -416,7 +694,6 @@ class MainWindow(QMainWindow):
         self.tabs.insertTab(0, dashboard, "Dashboard")
 
         self.setCentralWidget(self.tabs)
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
