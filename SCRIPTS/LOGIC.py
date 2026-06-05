@@ -384,10 +384,10 @@ def main():
     model_1 = MASKRCNN(
         "taloja1",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
         "model_final.pth",
         0.90,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY/TALOJA_MODEL_8MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
         False,
         GPU_ID=0
     )
@@ -395,10 +395,10 @@ def main():
     model_2 = MASKRCNN(
         "taloja2",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
         "model_final.pth",
         0.90,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_8MAY/TALOJA_MODEL_8MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
         False,
         GPU_ID=0
     )
@@ -408,6 +408,7 @@ def main():
     while True:
 
         base = os.path.join(RAW_PATH, LOCATION)
+        mq_obj.publish("main/logic", {"roll_num": "--"})
         print("WAITING FOR DATA")
 
         if not os.path.exists(base):

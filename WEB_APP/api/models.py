@@ -27,9 +27,9 @@ class DEFECTS_HISTORY(models.Model):
     id = models.AutoField(db_column='ID', primary_key=True)
     cycle_uid = models.CharField(db_column='CYCLE_UID', max_length=50)
     defect_detail = models.CharField(db_column='DEFECT_DETAIL', blank=True, null=True, max_length=1000)
-    defect_str = models.CharField(db_column='DEFECT_STR', blank=True, null=True, max_length=100)
     create_time = models.DateTimeField(db_column='CREATE_TIME', auto_now_add=True)
     img_path = models.CharField(db_column='IMG_PATH', max_length=500, blank=True, null=True)
+    json_path = models.CharField(db_column='JSON_PATH', max_length=500, blank=True, null=True)
 
     class Meta:
         managed = True

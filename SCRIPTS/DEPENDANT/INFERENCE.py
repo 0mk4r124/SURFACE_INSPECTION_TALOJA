@@ -50,7 +50,7 @@ class MASKRCNN:
             tag = self.tag
             torch.cuda.set_device(self.GPU_ID)
             self.labelMap = self.__loadLablMap__()
-            self.class_list = np.array(list(self.labelMap.values()))
+            self.class_list = list(self.labelMap.values())
             MetadataCatalog.get(tag).set(thing_classes=self.class_list)
 
             self.metadata = MetadataCatalog.get(tag)

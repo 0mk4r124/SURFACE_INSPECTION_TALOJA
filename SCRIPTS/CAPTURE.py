@@ -72,11 +72,10 @@ def process_capture(flir, mq_obj, logger):
     while True:
         try:
 
-            data = mq_obj.data
-            if data and data.get("_consumed") is not True:
+            data = mq_obj.pop("taloja/capture")
+            if data:
                 action = data.get("action", "")
                 roll_num = data.get("roll_num", "")
-                mq_obj.data = {**data, "_consumed": True}
 
                 if action == "start":
                     current_roll_num = roll_num
@@ -87,8 +86,8 @@ def process_capture(flir, mq_obj, logger):
                     while True:
                         counter += 1
 
-                        data = mq_obj.data
-                        if data and data.get("_consumed") is not True:
+                        data = mq_obj.pop("taloja/capture")
+                        if data:
                             action = data.get("action", "")
                             roll_num = data.get("roll_num", roll_num)
                             diameter = data.get("diameter", 570)
@@ -97,11 +96,11 @@ def process_capture(flir, mq_obj, logger):
                             width = data.get("width", 0)
                             length = data.get("length", 0)
                         else:
-                            diameter = data.get("diameter", 570)
-                            mill_speed = data.get("mill_speed", 0)
-                            eg_setpoint = data.get("eg_setpoint", 0)
-                            width = data.get("width", 0)
-                            length = data.get("length", 0)
+                            diameter = 570
+                            mill_speed = 0
+                            eg_setpoint = 0
+                            width = 0
+                            length = 0
 
                         if action == "stop" and roll_num == current_roll_num:
                             counter = 0
@@ -182,7 +181,7 @@ def process_capture(flir, mq_obj, logger):
             logger.error(traceback.format_exc())
             raise
         
-def main(mq_obj):
+def main():
     mq_obj = MQTT("DATA_CAPTURE")
     mq_obj.subscribe("taloja/capture")
     logger.info("Starting main capture manager")

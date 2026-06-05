@@ -426,7 +426,7 @@ class DashboardTab(QWidget):
     def _cam_frame(self):
         """Black placeholder label used as a camera image display."""
         lbl = QLabel()
-        lbl.setFixedHeight(200)
+        lbl.setFixedHeight(500)
         lbl.setAlignment(Qt.AlignCenter)
         lbl.setStyleSheet("background: #111; border-radius: 4px; color: #555; font-size: 11px;")
         lbl.setText("No image")
@@ -616,7 +616,7 @@ class DashboardTab(QWidget):
             self.t_speed.setText(f"{d.get('mill_speed', '—')} rpm"  if d.get('mill_speed') is not None else "—")
             self.t_eg.setText(str(d.get('eg_setpoint', '—')))
             self.t_width.setText(f"{d.get('width', '—')} mm"        if d.get('width') is not None else "—")
-            self.t_length.setText(f"{d.get('length', '—')} m"       if d.get('length') is not None else "—")
+            self.t_length.setText(f"{d.get('length', '—')} mm"       if d.get('length') is not None else "—")
 
             # mill_run / ironing
             mill_run = d.get("mill_run")

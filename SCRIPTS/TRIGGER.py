@@ -44,7 +44,7 @@ def main():
                     roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     print(f"Trigger recieved - {roll_num}")
-                    time.sleep(2)
+                    # time.sleep(2)
 
                     while True:
 
@@ -55,7 +55,7 @@ def main():
                          length = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[4]")
                          mq_obj.publish("taloja/writer", {"action": "diameter", "value": diameter})
                          mq_obj.publish("taloja/capture", {"diameter": diameter, "mill_speed": mill_speed, "eg_setpoint": eg_setpoint, "width": width, "length": length}) 
-                         mq_obj.publish("main/trigger", {"roll_num": roll_num, "diameter": diameter, "mill_speed": mill_speed, "eg_setpoint": eg_setpoint, "width": width, "length": length}) 
+                         mq_obj.publish("main/trigger", {"mill_run": mill_run, "ironing_raised": ironing_raised, "roll_num": roll_num, "diameter": diameter, "mill_speed": mill_speed, "eg_setpoint": eg_setpoint, "width": width, "length": length}) 
                          mq_obj.publish("taloja/health_check", {"module": "trigger", "status": "Active"})
 
                          ironing_raised = plcobj.read_bit(1, f"{FRAME_CAPTURE_SIGNAL}[10]")
@@ -77,7 +77,7 @@ def main():
                if ironing_raised == 1: mq_obj.publish("taloja/writer", {"action": "light", "value": 1})
                if ironing_raised == 0: mq_obj.publish("taloja/writer", {"action": "light", "value": 0})
 
-               mq_obj.publish("main/trigger", {"roll_num": "-", "mill_run": mill_run, "ironing_raised": ironing_raised}) 
+               mq_obj.publish("main/trigger", {"roll_num": "--", "mill_run": mill_run, "ironing_raised": ironing_raised}) 
 
                logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
