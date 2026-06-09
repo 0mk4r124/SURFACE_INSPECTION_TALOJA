@@ -5,6 +5,24 @@ let startX, startY, imgX = 0, imgY = 0;
 let currentOpenedAnodeId = null;
 let currentOpenedBunch = null;
 let isImageLoading = false;
+let modalOpen = false;
+
+// State management variables
+let currentUID = null;
+let vehicleDetailsModalOpen = false;
+let emergencyModalOpen = false;
+let autoManualModalOpen = false;
+let statusCheckInterval = null;
+
+// Print job state
+let pendingPrintRow    = null;
+let printModalInstance = null;
+const defectColors = {
+    "V": "#007bff",
+    "D": "#dc3545",
+    "S": "#28a745",
+    "C": "#fd7e14"
+};
 
 const img = document.getElementById("modalImage");
 const wrapper = document.getElementById("zoomWrapper");
@@ -67,7 +85,7 @@ wrapper.addEventListener("mouseleave", () => {
 
 document.addEventListener("DOMContentLoaded", function () {
     // Initialize daterangepicker with default last 7 days
-    $('#date_range-abf').daterangepicker({
+    $('#date_range').daterangepicker({
         autoUpdateInput: true,
         startDate: moment().subtract(0, 'days'),
         endDate: moment(),
@@ -81,94 +99,24 @@ document.addEventListener("DOMContentLoaded", function () {
         autoApply: false,
         buttonClasses: ['btn', 'btn-sm', 'btn-primary'],
     }, function (start, end) {
-        $('#date_range-abf').val(start.format("YYYY-MM-DD") + " - " + end.format("YYYY-MM-DD"));
+        $('#date_range').val(start.format("YYYY-MM-DD") + " - " + end.format("YYYY-MM-DD"));
     });
 
     // Apply event
-    $('#date_range-abf').on("apply.daterangepicker", function (ev, picker) {
+    $('#date_range').on("apply.daterangepicker", function (ev, picker) {
         const start = picker.startDate.format("YYYY-MM-DD");
         const end = picker.endDate.format("YYYY-MM-DD");
         $(this).val(start === end ? start : start + " - " + end);
     });
 
     // Cancel event
-    $('#date_range-abf').on("cancel.daterangepicker", function () {
+    $('#date_range').on("cancel.daterangepicker", function () {
         $(this).val("");
     });
 });
 
-document.addEventListener("DOMContentLoaded", function () {
-    // Initialize daterangepicker with default last 7 days
-    $('#date_range-huh').daterangepicker({
-        autoUpdateInput: true,
-        startDate: moment().subtract(0, 'days'),
-        endDate: moment(),
-        locale: {
-            format: "YYYY-MM-DD",
-            cancelLabel: "Clear",
-            applyLabel: "Apply"
-        },
-        opens: "right",
-        drops: "down",
-        autoApply: false,
-        buttonClasses: ['btn', 'btn-sm', 'btn-primary'],
-    }, function (start, end) {
-        $('#date_range-huh').val(start.format("YYYY-MM-DD") + " - " + end.format("YYYY-MM-DD"));
-    });
-
-    // Apply event
-    $('#date_range-huh').on("apply.daterangepicker", function (ev, picker) {
-        const start = picker.startDate.format("YYYY-MM-DD");
-        const end = picker.endDate.format("YYYY-MM-DD");
-        $(this).val(start === end ? start : start + " - " + end);
-    });
-
-    // Cancel event
-    $('#date_range-huh').on("cancel.daterangepicker", function () {
-        $(this).val("");
-    });
-});
-
-
-
-function fetchLastConfigurations() {
-    fetch('/api/last-10-entries/')
-        .then(res => {
-            if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            return res.json();
-        })
-        .then(data => {
-            console.log("Fetched stone configurations:", data);
-            populateTable(data.data, 'ABF_body');
-        })
-        .catch(err => {
-            console.error('Error fetching stone configurations:', err);
-        });
-}
-
-
-function health_status() {
-    fetch('/api/health-status/')
-        .then(res => {
-            if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
-            return res.json();
-        })
-        .then(data => {
-            console.log("Fetched health status:", data);
-            populateTable(data.data, 'health_body');
-        })
-        .catch(err => {
-            console.error('Error fetching health status:', err);
-        });
-}
-
-
-function fetchABFData(page = 1) {
-    const dateRange = document.getElementById('date_range-abf').value;
+function fetchHistoryData(page=1) {
+    const dateRange = document.getElementById('date_range').value;
     if (!dateRange) {
         alert("Please select a date range");
         return;
@@ -176,183 +124,61 @@ function fetchABFData(page = 1) {
     if (dateRange.includes(" - ")) {
         [startDate, endDate] = dateRange.split(" - ").map(s => s.trim());
     } else {
-        // Single date selected
         startDate = endDate = dateRange.trim();
     }
-
-    // Get anode number search value
-    const anodeNumber = document.getElementById('anode_number_search-abf').value.trim();
-    let url = `/api/fetch_abf_data/?start_date=${startDate}&end_date=${endDate}&page=${page}`;
-    if (anodeNumber) {
-        url += `&anode_number=${encodeURIComponent(anodeNumber)}`;
-    }
-
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            populateTable(data.data, 'ABF_body');
-            setupPagination(data.total, data.page, data.per_page, "abf");
-            document.getElementById("total_bunch_count").textContent = data.total;
-        })
-        .catch(err => console.error(err));
-}
-
-function fetchHUHData(page = 1) {
-    const dateRange = document.getElementById('date_range-huh').value;
-    if (!dateRange) {
-        alert("Please select a date range");
-        return;
-    }
-
-    if (dateRange.includes(" - ")) {
-        [startDate, endDate] = dateRange.split(" - ").map(s => s.trim());
-    } else {
-        // Single date selected
-        startDate = endDate = dateRange.trim();
-    }
-
-    // Get coil number search value
-    const coilNumber = document.getElementById('coil_number_search-huh').value.trim();
+    
+    const vehicleNumber = document.getElementById('vehicle_number_search').value.trim();
+    const vendorNumber = document.getElementById('vendor_name_search').value.trim();
     let url = `/api/fetch_history_data/?start_date=${startDate}&end_date=${endDate}&page=${page}`;
-    if (coilNumber) {
-        url += `&coil_number=${encodeURIComponent(coilNumber)}`;
+    if (vehicleNumber) {
+        url += `&vehicle_number=${encodeURIComponent(vehicleNumber)}`;
     }
-
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            console.log(data.data);
-            populateTable(data.data, 'HUH_body');
-            setupPagination(data.total, data.page, data.per_page, "huh");
-            document.getElementById("total_stem_count").textContent = data.total;
-        })
-        .catch(err => console.error(err));
-}
-
-function fetchBunchData(bunch_id, loc) {
-
-    let url = "";
-
-    if (loc === "abf") {
-        url = `/api/fetch_bunch_data/?bunch_id=${bunch_id}`;
-    } else if (loc === "fta") {
-        url = `/api/fetch_fta_bunch_data/?bunch_id=${bunch_id}`;
+    if (vendorNumber) {
+        url += `&vendor_name=${encodeURIComponent(vendorNumber)}`;
     }
-
+    
     fetch(url)
         .then(response => response.json())
         .then(data => {
-            populateTable(data.data, 'Bunch_body', loc);
-            document.getElementById("Bunch_title").innerHTML = `Bunch Number: <b>${bunch_id}</b>`;
-        })
-
-        .catch(err => console.error(err));
-}
-
-function fetchStemData(stem_id) {
-
-    const url = `/api/fetch_stem_data/?stem_id=${stem_id}`;
-
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            populateTable(data.anodes_data, 'Anodes_body');
-            populateTable(data.pr_data, 'Remarks_body');
-            document.getElementById("Stem_title").innerHTML = `Stem: <b>${stem_id}</b>`;
+            populateTable(data.data, 'History_body');
+            setupPagination(data.total, data.page, data.per_page, "history");
         })
         .catch(err => console.error(err));
 }
 
-function populateTable(data, table_name, loc = '') {
+function populateTable(data, table_name) {
     const tbody = document.getElementById(table_name);
     tbody.innerHTML = '';
 
-    if (table_name === 'ABF_body') {
+    if (table_name === 'History_body'){
         data.forEach(row => {
             const tr = document.createElement('tr');
-
-            const Img1Button = row.view_image
-                ? `<button class="btn btn-sm btn-primary view-image-btn" data-src="${row.view_image}">Image View</button>`
-                : "";
-
-            tr.innerHTML = `
-                <td>${row.sno}</td>
-                <td>${row.defect_name}</td>
-                <td>${row.defect_x_size} * ${row.defect_y_size} mm</td>
-                <td>${row.cycle_uid}</td>
-                <td>${row.create_time}</td>
-                <td>${Img1Button}</td>
-                `;
-            tbody.appendChild(tr);
-        });
-    }
-    else if (table_name === 'health_body') {
-        data.forEach(row => {
-            const tr = document.createElement('tr');
-
-            const statusColor = row.status === 'ACTIVE' ? 'green' : (row.status === 'INACTIVE' ? 'red' : 'inherit');
-
-            tr.innerHTML = `
-                <td>${row.sno}</td>
-                <td>${row.device_type}</td>
-                <td style="color: ${statusColor}; font-weight: bold;">${row.status}</td>
-                <td>${row.last_ping}</td>
+            const DetailsButton = `
+            <button
+                class="btn btn-primary btn-sm view-run-details"
+                data-cycle="${row.cycle_uid}">
+                View Details
+            </button>
             `;
-            tbody.appendChild(tr);
-        });
-    }
-    else if (table_name === 'HUH_body') {
-        data.forEach(row => {
-            const tr = document.createElement('tr');
 
-            const Img1Button = row.view_image
-                ? `<button class="btn btn-sm btn-primary view-image-btn" data-src="${row.view_image}">Image View</button>`
-                : "";
-
-            tr.innerHTML = `
-                <td>${row.sno}</td>
-                <td>${row.defect_name}</td>
-                <td>${row.defect_x_size} * ${row.defect_y_size} mm</td>
-                <td>${row.cycle_uid}</td>
-                <td>${row.create_time}</td>
-                <td>${Img1Button}</td>
-                `;
-            tbody.appendChild(tr);
-        });
-    }
-    else if (table_name === 'Anodes_body') {
-        data.forEach(row => {
-            const tr = document.createElement('tr');
-
-            tr.innerHTML = `
-                <td>${row.sno}</td>
-                <td>${row.anode_number}</td>
-                <td>${row.position}</td>
-                <td>${row.capture_time}</td>
-                <td>
-                ${row.view_image
-                    ? `<button class="btn btn-sm btn-primary view-stem-image-btn" data-anodeid="${row.anode_number}" data-stemid="${row.stemid}" data-src="${row.view_image}">Image View</button>`
-                    : 'No Image'}
-                </td>
+            const DownloadButton = `
+            <button
+                class="btn btn-success btn-sm download-run-data"
+                data-cycle="${row.cycle_uid}">
+                CSV
+            </button>
             `;
-            tbody.appendChild(tr);
-        });
-    }
-    else if (table_name === 'Remarks_body') {
-        data.forEach(row => {
-            const tr = document.createElement('tr');
 
             tr.innerHTML = `
-                <td>${row.sno}</td>
-                <td>${row.zone}</td>
-                <td>${row.pot_number}</td>
-                <td>${row.capture_time}</td>
-                <td>${row.remark}</td>
-                <td>
-                ${row.view_image
-                    ? `<button class="btn btn-sm btn-primary view-stem-image-btn" data-stemid="${row.stem_number}" data-src="${row.view_image}">Image View</button>`
-                    : 'No Image'}
-                </td>
+            <td>${row.sno}</td>
+            <td>${row.datetime}</td>
+            <td>${row.coil_id}</td>
+            <td>${row.total_defects}</td>
+            <td>${row.total_frames}</td>
+            <td>${row.total_defect_frames}</td>
+            <td>${row.defect_summary}</td>
+            <td>${DetailsButton}</td>
+            <td>${DownloadButton}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -407,8 +233,8 @@ function renderPagination(pagination, tab) {
             <nav>
                 <ul class="pagination mb-0">
                 ${pagination.has_previous ?
-            `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page - 1}">Previous</a></li>` :
-            `<li class="page-item disabled"><span class="page-link">Previous</span></li>`}
+                    `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page - 1}">Previous</a></li>` :
+                    `<li class="page-item disabled"><span class="page-link">Previous</span></li>`}
     `;
 
     pagination.custom_page_range.forEach(num => {
@@ -423,8 +249,8 @@ function renderPagination(pagination, tab) {
 
     html += `
                 ${pagination.has_next ?
-            `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page + 1}">Next</a></li>` :
-            `<li class="page-item disabled"><span class="page-link">Next</span></li>`}
+                    `<li class="page-item"><a class="page-link" href="#" data-page="${pagination.current_page + 1}">Next</a></li>` :
+                    `<li class="page-item disabled"><span class="page-link">Next</span></li>`}
                 </ul>
             </nav>
         </div>
@@ -436,150 +262,58 @@ function renderPagination(pagination, tab) {
         link.addEventListener("click", function (e) {
             e.preventDefault();
             const page = parseInt(this.getAttribute("data-page"));
-            if (tab === 'abf') { if (!isNaN(page)) fetchABFData(page); }
-            if (tab === 'huh') { if (!isNaN(page)) fetchHUHData(page); }
+            if (tab === 'history') {
+                if (!isNaN(page)) fetchHistoryData(page);
+            }
         });
     });
 }
 
-document.getElementById('updateImageBtn').addEventListener("click", function () {
-    const loc = document.getElementById("loc_hidden").value;
-    const old_anode = document.getElementById("anodeId_hidden").value;
-    const newAnodeId = document.getElementById("editAnodeInput").value;
-    const bunchId = document.getElementById("bunchId_hidden").value;
-    const stemid = document.getElementById("stemid_hidden").value;
+document.addEventListener("click", async function(e){
 
-    const payload = {
-        loc: loc,
-        old_anode: old_anode,
-        new_anode: newAnodeId,
-    };
+    const btn =
+        e.target.closest(".view-run-details");
 
-    if (bunchId) payload.bunch = bunchId;
-    if (stemid) payload.stemid = stemid;
+    if(!btn) return;
 
-    fetch(`/api/update_anode/`, {
-        method: "POST",
-        headers: {
-            "X-CSRFToken": csrftoken,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-    })
-        .then(r => r.json())
-        .then(res => {
-            if (res.success) {
-                bootstrap.Modal.getInstance(document.getElementById("imageModal")).hide();
-                if (bunchId) { fetchBunchData(bunchId, loc); }
-                else if (stemid) { fetchStemData(stemid); }
-            }
-            else alert("Failed to update")
-        })
-        .catch(err => console.error(err));
-});
+    const cycleUid =
+        btn.dataset.cycle;
 
-// document.addEventListener('click', function (e) {
-//     const btn = e.target.closest('.view-image-btn');
-//     if (!btn) return;
+    const response =
+        await fetch(
+            `/api/get_run_details/?cycle_uid=${cycleUid}`
+        );
 
-//     const loc = btn.dataset.loc;
-//     const imgSrc = btn.dataset.src;
-//     const bunch_id = btn.dataset.bunch_name;
-//     const anode_id = btn.dataset.anodeid;
+    const data =
+        await response.json();
 
-//     document.getElementById("loc_hidden").value = loc;
-//     document.getElementById("anodeId_hidden").value = anode_id;
-//     document.getElementById("bunchId_hidden").value = bunch_id;
-//     document.getElementById("stemid_hidden").value = "";
+    renderDefectGraph(data.result);
 
-//     document.getElementById("BunchID_title").innerHTML = `Bunch Number: <b>${bunch_id}</b>`;
-//     document.getElementById("editAnodeInput").value = anode_id;
+    updateDefectSummary(data);
 
-//     const modal = new bootstrap.Modal(document.getElementById('imageModal'));
-//     modal.show();
+    const modal =
+        new bootstrap.Modal(
+            document.getElementById(
+                "runDetailsModal"
+            )
+        );
 
-//     // attach once
-//     document.getElementById("imageModal").dataset.src = imgSrc;
-// });
-
-document.addEventListener('click', function (e) {
-    const btn = e.target.closest('.view-stem-image-btn');
-    if (!btn) return;
-
-    const imgSrc = btn.dataset.src;
-    const stemid = btn.dataset.stemid;
-    const anode_id = btn.dataset.anodeid;
-
-    document.getElementById("anodeId_hidden").value = anode_id;
-    document.getElementById("stemid_hidden").value = stemid;
-    document.getElementById("bunchId_hidden").value = "";
-
-    document.getElementById("BunchID_title").innerHTML = `Stem Number: <b>${stemid}</b>`;
-    document.getElementById("editAnodeInput").value = anode_id;
-
-    const modal = new bootstrap.Modal(document.getElementById('imageModal'));
     modal.show();
-
-    document.getElementById("imageModal").dataset.src = imgSrc;
 });
 
 document.addEventListener('click', function (e) {
-
-    const btn = e.target.closest('.view-table-btn');
+    const btn = e.target.closest('.view-image-btn');
     if (!btn) return;
-    e.preventDefault();
 
-    // Detect which button was clicked
-    const abf_id = btn.getAttribute('data-bunchid');
-    const fta_id = btn.getAttribute('data-ftabunchid');
+    const vehicle_number = btn.dataset.vehicle_number;
+    const imgSrc = btn.dataset.src;
+    document.getElementById("vehicle_number").innerHTML = `Vehicle Number: <b>${vehicle_number}</b>`;
 
-    if (abf_id) {
-        fetchBunchData(abf_id, "abf");
-    }
-    else if (fta_id) {
-        fetchBunchData(fta_id, "fta");
-    }
+    const modalEl = document.getElementById('imageModal');
+    modalEl.dataset.src = imgSrc;
 
-    // Show modal
-    const tableModal = new bootstrap.Modal(document.getElementById('tableModal'));
-    tableModal.show();
-});
-
-document.addEventListener('click', function (e) {
-
-    // Check if a "View" button was clicked
-    const btn = e.target.closest('.view-tab-btn');
-    if (!btn) return;
-    e.preventDefault(); // prevent default action
-
-    const bunch_id = btn.getAttribute('data-stemnumber');
-    fetchStemData(bunch_id)
-
-    // Show the modal
-    const tabModal = new bootstrap.Modal(document.getElementById('tabModal'));
-    tabModal.show();
-});
-
-document.getElementById('tabModal')
-    .addEventListener('shown.bs.modal', function () {
-
-        const firstTab = this.querySelector('.nav-link');
-        bootstrap.Tab.getOrCreateInstance(firstTab).show();
-    });
-
-document.getElementById("modalImage").addEventListener("load", function () {
-
-    isImageLoading = false;
-    document.getElementById("imageLoader").style.display = "none";
-    this.style.display = "block";
-});
-
-document.getElementById("modalImage").addEventListener("error", function () {
-    if (!isImageLoading) return;   // ignore modal close/reset
-
-    isImageLoading = false;
-    document.getElementById("imageLoader").style.display = "none";
-    alert("Failed to load image");
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
 });
 
 document.getElementById("imageModal")
@@ -591,178 +325,97 @@ document.getElementById("imageModal")
         img.src = "";
         img.style.display = "none";
         loader.style.display = "none";
-    });
+});
 
 document.getElementById("imageModal")
-    .addEventListener("shown.bs.modal", function () {
+.addEventListener("shown.bs.modal", function () {
 
-        const img = document.getElementById("modalImage");
-        const loader = document.getElementById("imageLoader");
-        const src = this.dataset.src;
+    const img = document.getElementById("modalImage");
+    const loader = document.getElementById("imageLoader");
+    const src = this.dataset.src;
 
-        if (!src) return;
+    if (!src) return;
 
-        isImageLoading = true;
+    isImageLoading = true;
 
-        loader.style.display = "block";
+    loader.style.display = "block";
+    img.style.display = "none";
+
+    img.onload = function () {
+        loader.style.display = "none";
+        img.style.display = "block";
+        isImageLoading = false;
+    };
+
+    img.onerror = function () {
+        loader.style.display = "none";
         img.style.display = "none";
+        isImageLoading = false;
+    };
 
-        // Force browser paint before loading
-        requestAnimationFrame(() => {
-            img.src = "";
-            img.src = src;
-        });
+    img.src = src;
+});
+
+function updateDefectMap() {
+    const defectData = {
+        "defect_1": {
+            "type": "CAM",
+            "ip": "192.168.1.11",
+            "cam_serial": "1232345",
+            "status": "ACTIVE",
+            "last_ping": "09-06-2026 12:33PM",
+            "top": 20,
+            "left": 20
+        }
+    }
+    const cameraContainer = document.getElementById('defect-indicators');
+    
+    cameraContainer.innerHTML = '';
+
+    // Create invisible location info dots
+    Object.entries(defectData).forEach(([key, info]) => {
+        const dot = document.createElement('div');
+        let statusClass = '';
+
+        if (info.type && info.type == 'info') {
+            dot.className = 'fs-5 location-dot';
+        }
+        else {
+            if (info.status) statusClass = info.status.toLowerCase();
+            dot.className = `cam-dot ${statusClass}`;
+        }
+        
+        dot.style.top = `${info.top}%`;
+        dot.style.left = `${info.left}%`;
+
+        let tooltipText = `${key}\n`;
+
+        if (info.name) tooltipText += `Name: ${info.name}\n`;
+
+        if (info.current_stem) tooltipText += `Current Stem: ${info.current_stem}\n`;
+        if (info.current_bunch) tooltipText += `Current Bunch: ${info.current_bunch}\n`;
+        if (info.anodes) tooltipText += `Current Anodes: ${info.anodes}\n`;
+
+        if (info.status) tooltipText += `Status: ${info.status}\n`;
+        if (info.ip) tooltipText += `IP: ${info.ip}\n`;
+        if (info.cam_serial) tooltipText += `Cam Serial: ${info.cam_serial}\n`;
+
+        if (info.last_ping) tooltipText += `Last Ping: ${info.last_ping}\n`;
+
+        dot.dataset.tooltip = tooltipText.trim();
+        cameraContainer.appendChild(dot);
     });
-
-
-
-
-// Fetch and update camera statuses
-
-// const systemData = {
-//         'ABF Camera 1': {
-//             type: 'CAM',
-//             status: 'ACTIVE',
-//             ip: '192.168.1.10',
-//             cam_serial: '123456',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 27,
-//             left: 14
-//         },
-//         'ABF Camera 2': {
-//             type: 'CAM',
-//             status: 'ACTIVE',
-//             ip: '192.168.1.11',
-//             cam_serial: '234567',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 27,
-//             left: 27
-//         },
-//         'FTA Crane 1': {
-//             type: 'NUC',
-//             status: 'INACTIVE',
-//             ip: '192.168.1.20',
-//             cam_serial: '',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 65,
-//             left: 9
-//         },
-//         'FTA Crane 2': {
-//             type: 'NUC',
-//             status: 'ACTIVE',
-//             ip: '192.168.1.21',
-//             cam_serial: '',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 65,
-//             left: 28
-//         },
-//         'HUH Camera 1': {
-//             type: 'CAM',
-//             status: 'ACTIVE',
-//             ip: '192.168.1.30',
-//             cam_serial: '345678',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 68,
-//             left: 51
-//         },
-//         'HUH Camera 2': {
-//             type: 'CAM',
-//             status: 'INACTIVE',
-//             ip: '192.168.1.31',
-//             cam_serial: '456789',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 68,
-//             left: 65
-//         },
-//         'Shotblast Camera 1': {
-//             type: 'CAM',
-//             status: 'DISABLED',
-//             ip: '192.168.1.40',
-//             cam_serial: '567890',
-//             last_ping: '',
-//             top: 24,
-//             left: 74
-//         },
-//         'Shotblast Camera 2': {
-//             type: 'CAM',
-//             status: 'DISABLED',
-//             ip: '192.168.1.41',
-//             cam_serial: '678901',
-//             last_ping: '',
-//             top: 24,
-//             left: 87
-//         },
-//         'Web Server': {
-//             type: 'SERVER',
-//             status: 'ACTIVE',
-//             ip: '192.168.1.100',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 15,
-//             left: 50
-//         },
-//         'Mobile Server': {
-//             type: 'SERVER',
-//             status: 'ACTIVE',
-//             ip: '192.168.1.101',
-//             last_ping: '20-01-2025 12:42PM',
-//             top: 20,
-//             left: 50
-//         },
-//         'ABF': {
-//             type: 'LOC',
-//             name: 'Anode Baking Furnace',
-//             current_stem: '',
-//             current_bunch: 'B001',
-//             anodes: ['A1', 'A2'],
-//             top: 30,
-//             left: 20
-//         },
-//         'FTA': {
-//             type: 'LOC',
-//             name: 'Furnace Tending Area',
-//             current_stem: '',
-//             current_bunch: 'B001',
-//             anodes: ['A1', 'A2'],
-//             top: 60,
-//             left: 20
-//         },
-//         'HUH': {
-//             type: 'LOC',
-//             name: 'Hooking Un-Hooking',
-//             current_stem: 'S001',
-//             current_bunch: 'B001',
-//             anodes: ['A1', 'A2'],
-//             top: 60,
-//             left: 60
-//         },
-//         'SHOTBLAST': {
-//             type: 'LOC',
-//             name: 'Shotblast',
-//             current_stem: 'S001',
-//             current_bunch: '',
-//             anodes: [],
-//             top: 30,
-//             left: 80
-//         },
-//         'POTROOM': {
-//             type: 'LOC',
-//             name: 'Potroom',
-//             current_stem: 'S001',
-//             current_bunch: '',
-//             anodes: [],
-//             top: 60,
-//             left: 80
-//         }
-// };
+}
 
 function updateSystemStatus() {
     const cameraContainer = document.getElementById('camera-indicators');
     const locationContainer = document.getElementById('location-dots');
-
+    
     cameraContainer.innerHTML = '';
     locationContainer.innerHTML = '';
 
     // Create invisible location info dots
+    // console.log(systemData);
     Object.entries(systemData).forEach(([key, info]) => {
         const dot = document.createElement('div');
         let statusClass = '';
@@ -774,7 +427,7 @@ function updateSystemStatus() {
             if (info.status) statusClass = info.status.toLowerCase();
             dot.className = `cam-dot ${statusClass}`;
         }
-
+        
         dot.style.top = `${info.top}%`;
         dot.style.left = `${info.left}%`;
 
@@ -804,80 +457,250 @@ async function fetchSystemStatus() {
         const response = await fetch('/api/health_status/');
         const data = await response.json();
         systemData = data.data;
-
+        
         updateSystemStatus();
     } catch (error) {
         console.error('Error fetching system status:', error);
     }
 }
 
-// Initialize
-document.addEventListener('DOMContentLoaded', function () {
-    // fetchSystemStatus();
-    // Update every 10 seconds
-    // setInterval(fetchSystemStatus, 10000);
-    setInterval(health_status, 2000);
-    fetchLastConfigurations()
+function updateCameraImages() {
+    const url = `/api/live-ip-camera`;
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === "success") {
+                data.cameras.forEach((cam, idx) => {
+                    const slot = document.getElementById(`camera-slot-${idx + 1}`);
+                    if (!slot) return;
+                    let img = slot.querySelector("img");
 
-});
+                    if (cam.image_url) {
+                        if (!img) {
+                            // Create img once if it doesn't exist
+                            img = document.createElement("img");
+                            slot.innerHTML = "";  // clear slot only first time
+                            slot.appendChild(img);
+                        }
+                        // Update src without creating new element → no blink
+                        img.src = `${cam.image_url}?t=${Date.now()}`;
+                    } else {
+                        slot.innerHTML = "No Camera Selected";
+                    }
+                });
+            }
+        })
+        .catch(err => console.error("Error fetching camera images:", err));
+}
 
+async function fetchCurrentStatus() {
 
+    try {
 
+        const response = await fetch("/api/get_current_status/");
+        const data = await response.json();
 
+        document.getElementById("currentState").innerText =
+            data.status.toUpperCase();
 
+        document.getElementById("coil_id").innerText =
+            data.coil_id;
 
+        document.getElementById("cycle_uid").innerText =
+            data.cycle_uid;
 
+        updateDefectSummary(data);
 
+        renderDefectGraph(data.result);
 
-document.addEventListener('click', function (e) {
-    const btn = e.target.closest('.view-image-btn');
-    if (!btn) return;
-    document.getElementById("vehicle_number").innerHTML = `<b>Defect Image</b>`;
+    }
+    catch(err){
+        console.error(err);
+    }
+}
 
-    const modal = new bootstrap.Modal(document.getElementById('imageModal'));
-    modal.show();
-    document.getElementById("imageModal").dataset.src = btn.dataset.src;
-});
+function updateDefectSummary(data){
 
-document.getElementById("imageModal")
-    .addEventListener("hidden.bs.modal", function () {
-        const img = document.getElementById("modalImage");
-        const loader = document.getElementById("imageLoader");
+    let defectTypes = {};
 
-        isImageLoading = false;
-        img.src = "";
-        img.style.display = "none";
-        loader.style.display = "none";
-    });
+    data.result.forEach(frame => {
 
-document.getElementById("imageModal")
-    .addEventListener("shown.bs.modal", function () {
+        Object.entries(frame.t || {}).forEach(([type,count]) => {
 
-        const img = document.getElementById("modalImage");
-        const loader = document.getElementById("imageLoader");
-        const src = this.dataset.src;
-
-        if (!src) return;
-
-        isImageLoading = true;
-
-        loader.style.display = "block";
-        img.style.display = "none";
-
-        // Force browser paint before loading
-        requestAnimationFrame(() => {
-            img.src = "";
-            img.onload = function () {
-                loader.style.display = "none";
-                img.style.display = "block";
-                isImageLoading = false;
-            };
-            img.onerror = function () {
-                loader.style.display = "none";
-                img.style.display = "block";
-                isImageLoading = false;
-                // alert("Failed to load image");
-            };
-            img.src = src;
+            defectTypes[type] =
+                (defectTypes[type] || 0) + count;
         });
     });
+
+    let html = `
+        <strong>TOTAL DEFECTS : ${data.total_defects}</strong><br>
+        <strong>TOTAL FRAMES : ${data.total_frames}</strong><br>
+        <strong>TOTAL DEFECTIVE FRAMES : ${data.total_defective_frames}</strong><br>
+    `;
+
+    Object.entries(defectTypes).forEach(([k,v]) => {
+
+        html += `
+            <strong>${k} : ${v}</strong><br>
+        `;
+    });
+
+    document.getElementById("defectsSummary").innerHTML = html;
+}
+
+function renderDefectGraph(results){
+
+    let traces = {};
+
+    results.forEach(item => {
+
+        const lengthPos = Number(item.l);
+
+        Object.entries(item.t || {}).forEach(([defect,count]) => {
+
+            if (!traces[defect]) {
+
+                traces[defect] = {
+                    x: [],
+                    y: [],
+                    customdata: [],
+                    mode: "markers",
+                    type: "scatter",
+                    name: defect,
+                    marker: {
+                        size: 10,
+                        color: defectColors[defect] || "#555"
+                    }
+                };
+            }
+
+            for (let i=0; i<count; i++) {
+
+                traces[defect].x.push(lengthPos);
+
+                traces[defect].y.push(defect);
+
+                traces[defect].customdata.push({
+                    frame: item.r,
+                    severity: item.s,
+                    defect: defect,
+                    length: item.l,
+                    image: item.img
+                });
+            }
+        });
+    });
+
+    const plotData = Object.values(traces);
+
+    const layout = {
+
+        margin: {
+            l: 60,
+            r: 20,
+            t: 10,
+            b: 50
+        },
+
+        xaxis: {
+            title: "Length (mm)"
+        },
+
+        yaxis: {
+            title: "Defect Type"
+        },
+
+        hovermode: "closest",
+
+        height: 300
+    };
+
+    Plotly.newPlot(
+        "defectGraph",
+        plotData,
+        layout,
+        {
+            responsive: true,
+            displaylogo: false
+        }
+    );
+
+    const graph =
+        document.getElementById("defectGraph");
+
+    graph.on("plotly_hover", function(){});
+
+    graph.on("plotly_click", function(data){
+
+        const point =
+            data.points[0].customdata;
+
+        openDefectImage(point);
+    });
+
+    plotData.forEach(trace => {
+
+        trace.hovertemplate =
+            "<b>Defect:</b> %{customdata.defect}<br>" +
+            "<b>Frame:</b> %{customdata.frame}<br>" +
+            "<b>Severity:</b> %{customdata.severity}<br>" +
+            "<b>Length:</b> %{customdata.length}<br>" +
+            "<extra></extra>";
+    });
+}
+
+function openDefectImage(point){
+
+    const imgUrl =
+        "/api/serve-file?file=" +
+        encodeURIComponent(point.image);
+
+    document.getElementById("vehicle_number").innerHTML =
+        `Frame ${point.frame} | ${point.defect}`;
+
+    const modal =
+        document.getElementById("imageModal");
+
+    modal.dataset.src = imgUrl;
+
+    new bootstrap.Modal(modal).show();
+}
+
+// Update on user activity
+function resetActivityTimer() {
+    lastActivityTime = Date.now();
+}
+
+// Listen to common user actions
+['click', 'mousemove', 'keydown', 'scroll', 'touchstart'].forEach(event => {
+    document.addEventListener(event, resetActivityTimer, true);
+});
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+
+    // First run
+    resetActivityTimer();
+    fetchSystemStatus();
+    fetchCurrentStatus();
+    updateCameraImages();
+
+    // Polling loop
+    setInterval(fetchSystemStatus, 5000);
+    setInterval(fetchCurrentStatus, 5000);
+    setInterval(updateCameraImages, 2000);
+
+    // Smart refresh
+    setInterval(() => {
+        const now = Date.now();
+        const inactivityDuration = now - lastActivityTime;
+    
+        const REFRESH_TIMEOUT = 30 * 60 * 1000;
+    
+        if (inactivityDuration > REFRESH_TIMEOUT) {
+            console.log("Auto-refreshing due to inactivity");
+            window.location.reload();
+        }
+    }, 10 * 1000);
+
+});

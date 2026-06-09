@@ -22,6 +22,7 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('', include('pwa.urls')),
     path('', include('accounts.urls')),
     path('api/', include('api.urls')),
     # path('logout/', LogoutView.as_view(next_page='login'), name='logout'),

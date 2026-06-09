@@ -1,8 +1,9 @@
 {% load static %}
+{% load pwa %}
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{% block title %}SURFACE INSPECTION TALOJA{% endblock %}</title>
+    <title>{% block title %}Surface Inspection App{% endblock %}</title>
 
     <link rel="stylesheet" href="{% static 'css/bootstrap.min.css' %}">
     <link rel="stylesheet" href="{% static 'css/bootstrap-icons.css' %}">
@@ -13,6 +14,11 @@
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
     <link rel="icon" type="image/png" href="{% static 'logo/hindalco.png' %}">
 
+    <link rel="manifest" href="{% static 'manifest.json' %}">
+    <link rel="manifest" href="{% static 'manifest.json' %}">
+    <meta name="theme-color" content="#fdf50d">
+    {% progressive_web_app_meta %}
+
 </head>
 
 <body class="bg-light">
@@ -20,7 +26,7 @@
     <!-- Header -->
     <header class="bg-white shadow-sm p-3 d-flex align-items-center justify-content-between">
         <img src="{% static 'logo/hindalco.png' %}" style="width: 7rem; height: 4rem;">
-        <h3 class="fw-bold text-center flex-grow-1">SURFACE INSPECTION TALOJA</h3>
+        <h3 class="fw-bold text-center flex-grow-1">DRISHTI PORTAL - SURFACE INSPECTION TALOJA</h3>
         <div class="d-flex align-items-center position-relative">
             <!-- Right Profile Dropdown -->
             <div class="dropdown ms-auto">
@@ -62,10 +68,15 @@
     <script src="{% static 'js/daterangepicker/daterangepicker.js' %}"></script>
     <script src="{% static 'js/bootstrap-datepicker/bootstrap-datepicker.min.js' %}"></script>
     <script src="{% static 'js/chart.js' %}"></script>
+    <script src="{% static 'js/plotly-2.35.2.min.js' %}"></script>
     
-
     <!-- Finally, your custom scripts LAST -->
     <script src="{% static 'js/script.js' %}"></script>
+    <script>
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("{% static 'js/sw.js' %}");
+        }
+    </script>
 
 </body>
 </html>

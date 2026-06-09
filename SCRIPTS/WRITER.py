@@ -1,82 +1,138 @@
 import os
-import traceback
 import time
+import traceback
+
+from pymodbus.client import ModbusTcpClient
+from datetime import datetime
 
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
 
-from pymodbus.client import ModbusTcpClient
 
-BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
+BASE_FILE_PATH = os.environ.get(
+    "BASE_FILE_PATH",
+    "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/"
+)
 
+PLC_IP = "192.168.2.5"
+PLC_PORT = 502
+PLC_TIMEOUT = 3
 LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
 
-plclogger = initializeLogger("WRITER", LOGS_PATH=LOGS_PATH)
+logger = initializeLogger(
+    "WRITER", LOGS_PATH=os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
+)
+
 
 class WRITE_REGISTERS:
     PLC_WRITE = 4106
     PLC_STOP_LIGHT = 4247
-    
-def initClient():
-    client = ModbusTcpClient("192.168.2.5", port=502, timeout=3)
-    client.connect()
-    return client
 
-def writeToPlc(register,val):
-    try:
-        client=initClient()
-        client.write_register(address = register, value = val)
-    except Exception as e:
-        print(f"WriteToPLC Exception is : {e}")
-        plclogger.error(f"{traceback.format_exc()}")
 
-def readFromPlc(register):
-    client=initClient()
-    value=-1
+class PLCWriter:
 
-    try:
-        result = client.read_holding_registers(address=register, count=2)
-        value=result.getRegister(0)
-    except Exception as e:
-        print(f"WriteToPLC Exception is : {e}")
-        plclogger.error(f"{traceback.format_exc()}")
+    def __init__(self):
+        self.client = None
+        self.last_diameter = None
+        self.last_light = None
+        self.connect()
 
-    return value
+    def connect(self):
+
+        try:
+            if self.client:
+                self.client.close()
+        except: pass
+
+        self.client = ModbusTcpClient(
+            PLC_IP,
+            port=PLC_PORT,
+            timeout=PLC_TIMEOUT
+        )
+
+        self.client.connect()
+        logger.info("Connected to Modbus PLC")
+
+    def write_register(self, register, value):
+
+        try:
+
+            if not self.client.connected:
+                self.connect()
+
+            self.client.write_register(
+                address=register,
+                value=int(float(value))
+            )
+
+            return True
+
+        except Exception:
+            logger.error(traceback.format_exc())
+            
+            try:self.connect()
+            except:pass
+            
+            return False
+
+    def update(self, diameter, light):
+
+        try:
+
+            if diameter is not None:
+                self.write_register(
+                    WRITE_REGISTERS.PLC_WRITE,
+                    diameter
+                )
+                logger.info(f"WROTE | {WRITE_REGISTERS.PLC_WRITE} {diameter}")
+
+            if light is not None:
+                self.write_register(
+                    WRITE_REGISTERS.PLC_STOP_LIGHT,
+                    light
+                )
+                logger.info(f"WROTE | {WRITE_REGISTERS.PLC_STOP_LIGHT} {light}")
+
+        except Exception:
+            logger.error(traceback.format_exc())
+
 
 def main():
-    mq_obj = MQTT("WRITER")
-    mq_obj.subscribe("taloja/writer")
-    plclogger.info("Starting writer manager")
 
-    print("[PLC_SAMPLER] Ready, waiting for commands …")
-        
+    mq = MQTT("WRITER")
+    mq.subscribe("taloja/writer")
+    plc_writer = PLCWriter()
+
+    logger.info("Writer service started")
+
     while True:
-        data = mq_obj.data
-        if data and data.get("_consumed") is not True:
 
-            action = data.get("action", "")
-            value = data.get("value")
-            mq_obj.data = {**data, "_consumed": True}
+        try:
+            data = mq.pop("taloja/writer")
 
-            if action == "light":
-                writeToPlc(WRITE_REGISTERS.PLC_STOP_LIGHT, value)
-                time.sleep(0.5)
-                plclogger.info(f"Writing {value} - Stop Light")
-                print(f"Writing {value} - Stop Light")
-                
-            if action == "diameter":
-                writeToPlc(WRITE_REGISTERS.PLC_WRITE, value)
-                time.sleep(0.5)
-                plclogger.info(f"Writing Diameter")
-                print(f"Writing Diameter")
+            if not data:
+                time.sleep(0.05)
+                continue
+
+            diameter = data.get("diameter")
+            light = data.get("value")
+
+            plc_writer.update(diameter, light)
+            print(f"DIAMETER : {diameter} | LIGHT : {light} | {datetime.now()}")
+
+        except Exception:
+            logger.error(traceback.format_exc())
+            time.sleep(1)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
+
     while True:
-        try: main()
-        except:
-            print("Error in main() !")
-            plclogger.critical(f"{traceback.format_exc()}")
-            print("Restarting in 5 secs")
+
+        try:main()
+        except Exception:
+            logger.critical(traceback.format_exc())
+            print("Error in main()")
+            print("Restarting in 5 seconds")
+
             time.sleep(5)
-    

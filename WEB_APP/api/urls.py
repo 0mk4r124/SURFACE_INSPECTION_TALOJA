@@ -3,10 +3,12 @@ from .views import *
 
 urlpatterns = [
     path('dashboard/', APIDashboardView.as_view(), name='api_dashboard'),
+    path('serve-file/', serve_file, name='serve-file'),
+
     path('fetch_history_data/', fetch_history_data, name='fetch_history_data'),
-    path('serve-file/', serve_file, name='serve_file'),
-    path('last-10-entries/', last_ten_entries, name='last_10_entries'),
-    path('health-status/', health_status_view, name='health_status_view'),
+    # path('download_history_data/', download_history_data, name='download_history_data'),
+    path('get_current_status/', get_current_status, name='get_current_status'),
 
-
+    path('health_status/', health_status, name='health_status'),
+    path('live-ip-camera', live_ip_camera, name='live-ip-camera'),
 ]

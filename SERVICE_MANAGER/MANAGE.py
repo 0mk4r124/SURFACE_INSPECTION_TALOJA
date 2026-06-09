@@ -38,7 +38,7 @@ SERVICES = {
     "Capture": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE.py",
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
-    "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
+    # "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
     # "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
     # "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
 }
@@ -67,7 +67,7 @@ class ServiceTab(QWidget):
         self.process = None
         self.user_requested_stop = False
 
-        # NEW — watchdog timestamp
+        # NEW ? watchdog timestamp
         self.last_output_time = None
 
         layout = QVBoxLayout()
@@ -124,7 +124,7 @@ class ServiceTab(QWidget):
         self.clear_timer.timeout.connect(self.clear_logs)
         self.clear_timer.start(3600 * 1000)  # 1 hour
 
-        # NEW — WATCHDOG TIMER
+        # NEW ? WATCHDOG TIMER
         self.watchdog_timer = QTimer()
         self.watchdog_timer.timeout.connect(self.check_output_timeout)
         self.watchdog_timer.start(10000)  # check every 10 seconds
@@ -226,7 +226,7 @@ class ServiceTab(QWidget):
         self.process.terminate()
         # give some time to quit gracefully; if not, kill
         if not self.process.waitForFinished(3000):
-            self.append_log("[WARN] terminate timeout — killing process")
+            self.append_log("[WARN] terminate timeout ? killing process")
             self.process.kill()
             self.process.waitForFinished(2000)
 
@@ -295,7 +295,7 @@ class ServiceTab(QWidget):
 
         # Otherwise: crash detected -> auto restart
         set_status_color(self.status_label, "Exited", "Status")
-        self.append_log("[WARN] Service crashed — Restarting in 5 seconds...")
+        self.append_log("[WARN] Service crashed ? Restarting in 5 seconds...")
         self.process = None
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
@@ -319,7 +319,7 @@ class ServiceTab(QWidget):
         self.append_log("[Logs cleared automatically]")
 
     def check_output_timeout(self):
-        """NEW — Restart service if no output for 5 minutes."""
+        """NEW ? Restart service if no output for 5 minutes."""
         if not self.process:
             return
 
@@ -329,11 +329,11 @@ class ServiceTab(QWidget):
         silence = time.time() - self.last_output_time
         if "Web" in self.name or "Data" in self.name:
             if silence > 60*60*8:  # 8 hours
-                self.append_log("[WATCHDOG] No output for 8 hours — Restarting...")
+                self.append_log("[WATCHDOG] No output for 8 hours ? Restarting...")
                 self.restart_service()
         else:
             if silence > 60*60*1:  # 6 minutes
-                self.append_log("[WATCHDOG] No output for 1 hour — Restarting...")
+                self.append_log("[WATCHDOG] No output for 1 hour ? Restarting...")
                 self.restart_service()
 
     def open_chrome(self, url="http://127.0.0.1:8000"):
@@ -393,7 +393,7 @@ class DashboardTab(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🚀 Service Manager")
+        self.setWindowTitle("? Service Manager")
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
 
         self.tabs = QTabWidget()

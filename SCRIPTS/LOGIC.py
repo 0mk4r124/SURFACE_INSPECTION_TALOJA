@@ -169,7 +169,6 @@ def process_images(cycle_uid, cam_path, image_items, model):
 
     for rank, image_name in image_items:
         try:
-            print(rank)
             img_path = os.path.join(cam_path, image_name)
             img = cv2.imread(img_path)
             if img is None:
