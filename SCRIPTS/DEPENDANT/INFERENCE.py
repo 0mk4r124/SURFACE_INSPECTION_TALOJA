@@ -50,7 +50,8 @@ class MASKRCNN:
             tag = self.tag
             torch.cuda.set_device(self.GPU_ID)
             self.labelMap = self.__loadLablMap__()
-            self.class_list = np.array(list(self.labelMap.values()))
+            self.class_array = np.array(list(self.labelMap.values()))
+            self.class_list = list(self.labelMap.values())
             MetadataCatalog.get(tag).set(thing_classes=self.class_list)
 
             self.metadata = MetadataCatalog.get(tag)
@@ -101,7 +102,7 @@ class MASKRCNN:
             wh = np.stack([(xe - xs), (ye - ys)], axis=1).tolist()
 
             # Map class IDs to class names once
-            class_names = self.class_list[pred_class_surface]
+            class_names = self.class_array[pred_class_surface]
 
             labellist = list(zip(
                 scores_surface,

@@ -79,9 +79,9 @@ WSGI_APPLICATION = 'WEB_APP.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'myproject_db',
+        'NAME': 'SURFACE_INSPECTION_TALOJA',
         'USER': 'root',  # Replace with your MySQL username
-        'PASSWORD': '1234',  # Replace with your MySQL password
+        'PASSWORD': 'insightzz@123',  # Replace with your MySQL password
         'HOST': 'localhost',
         'PORT': '3306',
     }

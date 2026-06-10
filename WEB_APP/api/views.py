@@ -88,7 +88,7 @@ def serve_file(request):
 def live_ip_camera(request):
     try: 
         camera_paths = [
-            "/home/omkar/INSIGHTZZ/PROJECTS/TALOJA/SURFACE_INSPECTION_TALOJA/WEB_APP/static/img/nocam.jpg",
+            "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TEMP_IMG/TALOJA/24521939_debug.jpg",
         ]
         
         cameras = []

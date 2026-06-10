@@ -38,8 +38,8 @@ SERVICES = {
     "Capture": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE.py",
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
-    # "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
-    # "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
+    "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
+    "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
     # "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
 }
 
