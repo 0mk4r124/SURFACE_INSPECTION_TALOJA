@@ -27,64 +27,134 @@
 <div class="tab-content">
 
     <!-- ABF Tab -->
-    <div class="tab-pane fade show" id="DASHBOARD">
-        <div class="card shadow-sm">
-            <div class="card-body">
+    <div class="tab-pane fade show active" id="DASHBOARD">
+        <div class="si-dashboard">
+    
+            <!-- STATUS BAR -->
+            <div class="si-status-bar">
+                <div class="si-status-left">
+                    <div class="si-live-badge" id="siBadge">
+                        <span class="si-live-dot"></span>
+                        <span class="si-live-text">LIVE</span>
+                    </div>
+                    <div class="si-chip">
+                        <span class="si-chip-label">STATUS</span>
+                        <span class="si-chip-value si-mono" id="siStatus">IDLE</span>
+                    </div>
+                    <div class="si-chip">
+                        <span class="si-chip-label">COIL ID</span>
+                        <span class="si-chip-value si-mono" id="siCoilId">?</span>
+                    </div>
+                    <div class="si-chip">
+                        <span class="si-chip-label">CYCLE UID</span>
+                        <span class="si-chip-value si-mono" id="siCycleUid">?</span>
+                    </div>
+                </div>
+                <!-- right-side status removed from top; moved to bottom stats panel -->
+            </div>
+    
+            <!-- COIL DEFECT MAP (the hero element) -->
+            <div class="si-scanner-section">
+                <div class="si-scanner-header">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="si-section-label">COIL DEFECT MAP</span>
+                        <span class="si-coil-len" id="siCoilLen">8.5 km total</span>
+                    </div>
+                    <div class="si-legend">
+                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#00b4d8"></span>Vibration</span>
+                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#ff4757"></span>Dent</span>
+                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#2ed573"></span>Sliver</span>
+                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#ffa502"></span>Scratch</span>
+                        <button class="si-btn-reset" id="siZoomReset">RESET ZOOM</button>
+                        <div class="si-filter-controls">
+                            <button class="si-filter-btn active" data-type="ALL">All</button>
+                            <button class="si-filter-btn active" data-type="V">V</button>
+                            <button class="si-filter-btn active" data-type="D">D</button>
+                            <button class="si-filter-btn active" data-type="S">S</button>
+                            <button class="si-filter-btn active" data-type="C">C</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="si-canvas-wrap">
+                    <canvas id="siCoilCanvas" style="width:100%; height:150px; display:block;"></canvas>
+                    <div id="siCoilTooltip" class="si-tooltip"></div>
+                </div>
+                <div class="si-scanner-hint">Scroll to zoom || Drag to pan || Click spike to view defect image</div>
+            </div>
+    
+            <!-- STATS ROW removed; stats moved alongside live camera -->
+    
+            <!-- BOTTOM: camera feed + scatter plot -->
+            <div class="si-bottom-row">
 
-                <!-- Images Row -->
-                <div class="row g-2 mb-3">
+                <div class="si-camera-panel">
+                    <div class="si-panel-label">
+                        <span class="si-live-dot-sm"></span>CAMERA FEED
+                    </div>
+                    <div class="si-camera-slot" id="camera-slot-1">
+                        <div class="si-cam-placeholder">
+                            <i class="fas fa-camera fa-2x"></i>
+                            <span>No Signal</span>
+                        </div>
+                    </div>
+                </div>
 
-                    <div class="col-md-5 text-center">
-
-
-                        <div class="row g-2 mb-3 align-items-center">
-
-                            <div class="col-md-12 text-center border border-3 rounded video-box-lg" id="camera-slot-1">
+                <div class="si-stats-panel">
+                    <div class="si-panel-label">LIVE STATS</div>
+                    <div class="si-stats-vertical">
+                            <div class="si-insights">
+                                <div class="si-insight-title">INSIGHTZZ</div>
+                                <div class="si-insight-row"><strong id="ins-top-type">Top: -</strong></div>
+                                <div class="si-insight-row">Last Defect: <span id="ins-last-pos">-</span></div>
+                                <div class="si-insight-row">Avg Severity: <span id="ins-avg-sev">-</span></div>
                             </div>
-
-                            <div class="col-md-12">
-                                <div class="alert alert-info mb-0 fs-2">
-                                    <strong>CURRENT STATUS:</strong> <span id="currentState" class="badge bg-primary">IDLE</span>
-                                    <br>
-                                    <strong>COIL ID:</strong> <span id="coil_id">ABC123</span> | <span id="cycle_uid">12AB1234</span>
+                            <div class="si-chips-bottom">
+                                <div class="si-chip">
+                                    <span class="si-chip-label">SPEED</span>
+                                    <span class="si-chip-value si-mono" id="siSpeed">-- m/min</span>
+                                </div>
+                                <div class="si-chip">
+                                    <span class="si-chip-label">POSITION</span>
+                                    <span class="si-chip-value si-mono" id="siPosition">0.000 km</span>
+                                </div>
+                                <div class="si-chip">
+                                    <span class="si-chip-label">COVERAGE</span>
+                                    <span class="si-chip-value si-mono" id="siCoverage">0.0%</span>
+                                </div>
+                                <div class="si-chip">
+                                    <span class="si-chip-label">UPDATED</span>
+                                    <span class="si-chip-value si-mono" id="siUpdated">?</span>
                                 </div>
                             </div>
-
+                        <div class="si-stat-tile">
+                            <div class="si-stat-num si-mono" id="siStatFrames">0</div>
+                            <div class="si-stat-lbl">FRAMES</div>
                         </div>
-
+                        <div class="si-stat-tile si-stat-amber">
+                            <div class="si-stat-num si-mono" id="siStatDefFrames">0</div>
+                            <div class="si-stat-lbl">DEFECT FRAMES</div>
+                        </div>
+                        <div class="si-stat-tile si-stat-red">
+                            <div class="si-stat-num si-mono" id="siStatDefects">0</div>
+                            <div class="si-stat-lbl">DEFECTS</div>
+                        </div>
+                        <div class="si-stat-tile si-stat-types" id="siStatTypes">
+                            <div class="si-stat-lbl" style="margin:auto 0; color:#3d444d">NO DEFECTS YET</div>
+                        </div>
                     </div>
-            
-                    <div class="col-md-7 text-center">
-                        
-                        <div class="col-md-12 mb-3">
-                            <div class="alert alert-info mb-2">
-                                <strong>DEFECT MAP</strong>
-                            </div>
-                            <div id="defectGraph"></div>
-                        </div>
-
-                        <div class="col-md-12">
-                            <div class="alert alert-info mb-0 fs-2 height-100 d-flex flex-column justify-content-start">
-                                <strong>DEFECTS SUMMARY</strong>
-                            </div>
-
-                            <div id="defectsSummary" class="justify-content-left gap-3 mt-3">
-                                <strong>TOTAL DEFECTS: 5</strong><br>
-                                <strong>TOTAL FRAMES: 6</strong><br>
-                                <strong>TOTAL DEFECTIVE FRAMES: 7</strong><br>
-                                <strong>TOTAL SLIVER DEFECTS: 2</strong><br>
-                                <strong>TOTAL VIBRATION DEFECTS: 3</strong><br>
-                                <strong>TOTAL DENT DEFECTS: 4</strong><br>
-                            </div>
-
-                        </div>
-
-                    </div>
-
                 </div>
+
             </div>
+    
         </div>
+    
+        <!-- hidden legacy compat - keeps existing updateDefectSummary from erroring -->
+        <div id="defectsSummary" style="display:none"></div>
+        <div id="currentState" style="display:none"></div>
+        <div id="coil_id" style="display:none"></div>
+        <div id="cycle_uid" style="display:none"></div>
     </div>
+
 
     <!-- History Tab -->
     <div class="tab-pane fade show" id="HISTORY">

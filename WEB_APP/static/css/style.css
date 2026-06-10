@@ -312,3 +312,380 @@ body {
 .plotly .cursor-pointer {
     cursor: pointer;
 }
+
+/* ---- Layout container ---- */
+.si-dashboard {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 148px);
+    gap: 5px;
+    padding: 0 6px 4px 6px;
+    overflow: hidden;
+}
+
+/* ---- Status bar ---- */
+.si-status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #ffffff;
+    border: 1px solid #eef2f6;
+    border-radius: 6px;
+    padding: 8px 14px;
+    flex-shrink: 0;
+    min-height: 48px;
+}
+
+.si-status-left,
+.si-status-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+
+.si-live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 200, 150, 0.06);
+    border: 1px solid rgba(0, 200, 150, 0.12);
+    border-radius: 4px;
+    padding: 4px 9px;
+    flex-shrink: 0;
+}
+
+.si-live-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #00c98f;
+    animation: si-blink 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+.si-live-dot-sm {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #00bfa5;
+    animation: si-blink 2s ease-in-out infinite;
+    margin-right: 5px;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+@keyframes si-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+}
+
+.si-live-text {
+    color: #0b6b54;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.si-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.si-chip-label {
+    font-size: 0.75rem;
+    color: #485060;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    line-height: 1;
+}
+
+.si-chip-value {
+    font-size: 1rem;
+    color: #16323b;
+    font-weight: 600;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+.si-mono {
+    font-family: 'Courier New', monospace !important;
+    letter-spacing: 0.02em;
+}
+
+.si-status-processing { color: #ffa502 !important; }
+.si-status-idle       { color: #485060 !important; }
+.si-status-complete   { color: #2ed573 !important; }
+.si-status-error      { color: #ff4757 !important; }
+
+/* ---- Coil scanner section ---- */
+.si-scanner-section {
+    background: #ffffff;
+    border: 1px solid #eef2f6;
+    border-radius: 6px;
+    padding: 10px;
+    flex-shrink: 0;
+}
+
+.si-scanner-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.si-section-label {
+    font-size: 1rem;
+    font-weight: bold;
+    letter-spacing: 0.14em;
+    color: #00c9a7;
+    text-transform: uppercase;
+}
+
+.si-coil-len {
+    font-size: 1rem;
+    color: #485060;
+    font-family: 'Courier New', monospace;
+}
+
+.si-legend {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.si-filter-controls { display:flex; gap:6px; align-items:center; margin-left:8px; }
+.si-filter-btn {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #d1d7de;
+    background: #ffffff;
+    font-weight: 700;
+    font-size: 0.72rem;
+    cursor: pointer;
+    color: #2d333d;
+}
+.si-filter-btn.active { background: #00c9a7; color: white; border-color: rgba(0,201,167,0.9); }
+.si-filter-btn[data-type="ALL"] { font-weight: 900; }
+
+.si-insights { padding: 8px; border: 1px solid #eef2f6; border-radius:6px; background:#ffffff; margin-bottom:6px; }
+.si-insight-title { font-size: 0.85rem; font-weight:800; color:#16323b; margin-bottom:6px; }
+.si-insight-row { font-size: 0.9rem; color:#2d333d; margin:3px 0; }
+
+.si-chips-bottom { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.si-chips-bottom .si-chip { background:#f8fafb; padding:8px 10px; border-radius:6px; border:1px solid #eef2f6; }
+
+.si-leg-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.68rem;
+    color: #7b8794;
+}
+
+.si-leg-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.si-btn-reset {
+    background: none;
+    border: 1px solid #2d333d;
+    border-radius: 4px;
+    color: #7b8794;
+    font-size: 0.64rem;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    letter-spacing: 0.06em;
+}
+
+.si-btn-reset:hover {
+    background: #1c2128;
+    color: #cdd3db;
+}
+
+.si-canvas-wrap {
+    position: relative;
+    background: #f7fafc;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #e6e9ef;
+}
+
+.si-scanner-hint {
+    font-size: 0.59rem;
+    color: #2d333d;
+    text-align: center;
+    margin-top: 3px;
+    letter-spacing: 0.06em;
+}
+
+/* Tooltip */
+
+.si-tooltip {
+    position: absolute;
+    background: #ffffff;
+    border: 1px solid #e6ecf3;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.72rem;
+    color: #16323b;
+    pointer-events: none;
+    z-index: 200;
+    min-width: 150px;
+    box-shadow: 0 6px 18px rgba(20,30,40,0.06);
+    display: none;
+    line-height: 1.6;
+}
+
+.si-tooltip .tt-frame  { font-weight: 700; color: #0b2b38; margin-bottom: 2px; font-family: 'Courier New', monospace; }
+.si-tooltip .tt-pos    { color: #48606e; font-size: 0.66rem; margin-bottom: 2px; }
+.si-tooltip .tt-click  { color: #4a5564; font-size: 0.62rem; margin-top: 4px; }
+.si-tooltip .sev-high   { color: #d64545; font-weight: 700; }
+.si-tooltip .sev-medium { color: #d9822c; font-weight: 700; }
+.si-tooltip .sev-low    { color: #2e9b59; font-weight: 700; }
+
+/* ---- Stats row ---- */
+.si-stats-row {
+    display: none; /* moved into right-side stats panel */
+}
+
+.si-stat-tile {
+    flex: 1;
+    background: #ffffff;
+    border: 1px solid #eef2f6;
+    border-radius: 6px;
+    padding: 10px 12px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.si-stat-red   { border-left: 2px solid rgba(255,71,87,0.6) !important; }
+.si-stat-amber { border-left: 2px solid rgba(255,165,2,0.6) !important; }
+
+.si-stat-num {
+    font-size: 2.1rem; /* increased for visibility */
+    font-weight: 800;
+    color: #0b2b3a;
+    line-height: 1;
+}
+
+.si-stat-lbl {
+    font-size: 0.78rem; /* larger label */
+    color: #485060;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 4px;
+}
+
+.si-stat-types {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+}
+
+.si-type-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.70rem;
+}
+
+.si-type-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.si-type-name  { color: #6b7782; }
+.si-type-count { color: #0b2b3a; font-family: 'Courier New', monospace; font-weight: 700; margin-left: auto; }
+
+/* ---- Bottom row ---- */
+.si-bottom-row {
+    display: flex;
+    gap: 5px;
+    flex: 1;
+    min-height: 0;
+    max-height: 460px;
+}
+
+.si-camera-panel,
+.si-stats-panel {
+    background: #ffffff;
+    border: 1px solid #e9eef5;
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.si-camera-panel { flex: 0 0 30%; }
+.si-stats-panel  { flex: 0 0 70%; display: flex; flex-direction: column; gap: 10px; }
+
+.si-stats-vertical { display:flex; flex-direction: column; gap:10px; align-items: stretch; justify-content: flex-start; }
+
+/* defect graph visible and sized responsively */
+#defectGraph { display: block; width: 100%; height: 300px; border: 1px solid #ddd; border-radius: 8px; background: white; }
+
+.si-panel-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.10em;
+    color: #485060;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+}
+
+.si-camera-slot {
+    flex: 1;
+    background: #f7fafc;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    border: 1px solid #e6eef6;
+}
+
+.si-camera-slot img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.si-cam-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: #6b7782;
+    gap: 8px;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+}
+
+/* Force Plotly into the flex box */
+.si-chart-panel #defectGraph {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+}
+
+/* Make sure the DASHBOARD tab nav button shows as active when clicked */
+#DASHBOARD.active ~ .si-live-badge .si-live-dot { animation-play-state: running; }

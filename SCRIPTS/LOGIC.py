@@ -26,6 +26,7 @@ TEMP_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TEMP_IMG")
 RESULT_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RESULT")
 TRASH_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TRASH")
 LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
+LIVE_JSON_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TEMP_JSON", "live.json")
 
 # Database configuration
 db_user = os.environ.get('db_user', "root")
@@ -36,6 +37,12 @@ db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 PADDING = 50
 summary_lock = Lock()
 ALLOWED_DEFECTS = {"D", "V", "S"}
+DEFECT_CONFIG = {
+    "V": {"name": "VIBRATION", "color": (255, 0, 0)},      # Blue
+    "D": {"name": "DENT",      "color": (0, 0, 255)},      # Red
+    "S": {"name": "SLIVER",    "color": (0, 255, 0)},      # Green
+    "C": {"name": "SCRATCH",   "color": (0, 255, 255)},    # Yellow
+}
 
 logger = initializeLogger("LOGIC", LOGS_PATH=LOGS_PATH)
 
@@ -54,7 +61,7 @@ def getDBconn():
 
     return conn
 
-def save_defect_history(conn, cycle_uid, defect_details, img_path, json_path):
+def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json_path):
     cursor = None
 
     try:
@@ -75,7 +82,8 @@ def save_defect_history(conn, cycle_uid, defect_details, img_path, json_path):
 
             update_query = """
                 UPDATE DEFECTS_HISTORY
-                SET DEFECT_DETAILS = %s,
+                SET COIL_ID = %s,
+                    DEFECT_DETAILS = %s,
                     IMG_PATH = %s,
                     JSON_PATH = %s,
                     CREATE_TIME = %s
@@ -83,6 +91,7 @@ def save_defect_history(conn, cycle_uid, defect_details, img_path, json_path):
             """
 
             cursor.execute(update_query, (
+                coil_id,
                 defect_details,
                 img_path,
                 json_path,
@@ -94,12 +103,13 @@ def save_defect_history(conn, cycle_uid, defect_details, img_path, json_path):
 
             insert_query = """
                 INSERT INTO DEFECTS_HISTORY
-                (CYCLE_UID, DEFECT_DETAILS, IMG_PATH, JSON_PATH, CREATE_TIME)
-                VALUES (%s, %s, %s, %s, %s)
+                (CYCLE_UID, COIL_ID, DEFECT_DETAILS, IMG_PATH, JSON_PATH, CREATE_TIME)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
                 cycle_uid,
+                coil_id,
                 defect_details,
                 img_path,
                 json_path,
@@ -115,6 +125,25 @@ def save_defect_history(conn, cycle_uid, defect_details, img_path, json_path):
     finally:
         if cursor:
             cursor.close()
+
+def get_coil_id_from_millruns(conn, cycle_uid):
+    """Return coil_id from MILL_RUNS for given cycle_uid, or empty string if not found."""
+    if conn is None:
+        return ""
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        query = "SELECT coil_id FROM MILL_RUNS WHERE cycle_uid = %s LIMIT 1"
+        cursor.execute(query, (cycle_uid,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+    except Exception:
+        logger.error(f"Failed to fetch coil_id for {cycle_uid}: {traceback.format_exc()}")
+    finally:
+        if cursor:
+            cursor.close()
+    return ""
 
 def get_sorted_images(folder):
     files = [
@@ -170,40 +199,180 @@ def process_labels(labels, img_shape):
         x2 = min(w, x2 + PADDING)
         y2 = min(h, y2 + PADDING)
 
+        box_center_x = (x1 + x2) / 2.0
+        # visual frame maps full width to 300 mm (±150mm from center)
+        distance_mm = ((box_center_x - (w / 2.0)) / float(w)) * 300.0
+
         defect_boxes[cls].append({
             "b": [x1, x2, y1, y2],
-            "c": int(round(score, 3)*100)
+            "c": int(round(score, 3)*100),
+            "pos_mm": round(distance_mm, 2)
         })
 
     counts = {k: len(v) for k, v in defect_boxes.items()}
     return defect_boxes, counts
 
 def draw_boxes(img, defect_boxes):
+
+    h, w = img.shape[:2]
+
+    center_x = w // 2
+
+    # Draw center reference line
+    cv2.line(
+        img,
+        (center_x, 0),
+        (center_x, h),
+        (255, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        img,
+        "CENTER",
+        (center_x + 5, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2
+    )
+
     for cls, items in defect_boxes.items():
+
+        cls_upper = cls.upper()
+
+        config = DEFECT_CONFIG.get(
+            cls_upper,
+            {"name": cls_upper, "color": (255, 255, 255)}
+        )
+
+        color = config["color"]
+        defect_name = config["name"]
+
         for obj in items:
+
             x1, x2, y1, y2 = obj["b"]
             conf = obj["c"]
 
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            cv2.putText(img, f"{cls} ({conf}%)", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            box_center_x = (x1 + x2) / 2
+
+            distance_mm = (
+                (box_center_x - center_x)
+                / float(w)
+            ) * 300
+
+            label = (
+                f"{defect_name} "
+                f"({conf:.0f}%) "
+                f"{distance_mm:+.1f}mm"
+            )
+
+            # Draw defect box
+            cv2.rectangle(
+                img,
+                (x1, y1),
+                (x2, y2),
+                color,
+                2
+            )
+
+            # Background for text
+            (tw, th), _ = cv2.getTextSize(
+                label,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                2
+            )
+
+            text_y = max(25, y1 - 10)
+
+            cv2.rectangle(
+                img,
+                (x1, text_y - th - 6),
+                (x1 + tw + 10, text_y + 4),
+                color,
+                -1
+            )
+
+            cv2.putText(
+                img,
+                label,
+                (x1 + 5, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
+
+            # Draw line from box center to frame center
+            cv2.line(
+                img,
+                (int(box_center_x), (y1 + y2)//2),
+                (center_x, (y1 + y2)//2),
+                color,
+                1
+            )
+
     return img
 
 def add_summary(img, counts, severity):
-    total = sum(counts.values())
-    top3 = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:3]
-    summary = " | ".join([f"{k}-{v}" for k, v in top3])
 
-    cv2.putText(img, f"SEVERITY: {severity}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-    cv2.putText(img, f"TOTAL:    {total}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-    cv2.putText(img, f"SUMMARY:  {summary}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+    total = sum(counts.values())
+
+    summary = []
+
+    if counts.get("V", 0):
+        summary.append(f"V:{counts['V']}")
+
+    if counts.get("D", 0):
+        summary.append(f"D:{counts['D']}")
+
+    if counts.get("S", 0):
+        summary.append(f"S:{counts['S']}")
+
+    if counts.get("C", 0):
+        summary.append(f"C:{counts['C']}")
+
+    summary_text = " | ".join(summary)
+
+    cv2.putText(
+        img,
+        f"SEVERITY : {severity}",
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        img,
+        f"TOTAL DEFECTS : {total}",
+        (20, 80),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        img,
+        f"SUMMARY : {summary_text}",
+        (20, 120),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2
+    )
 
     return img
 
-def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_summary, mq_obj):
+def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results):
     defect_json, counts = {}, {}
     date_str = datetime.now().strftime('%Y%m%d')
 
     for rank, image_name in image_items:
+        print("Ranking:", rank, " - Processing:", image_name)
         try:
             img_path = os.path.join(cam_path, image_name)
 
@@ -232,13 +401,15 @@ def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_s
 
                     with summary_lock:
                         defect_summary["processed_at"] = datetime.now().isoformat()
-                        defect_summary["defect_frames"] = severity
-                        defect_summary["severity"] = severity
+                        defect_summary["last_severity"] = severity
                         defect_summary["distance"] = distance
                         defect_summary["S"] += counts.get("S", 0)
                         defect_summary["D"] += counts.get("D", 0)
                         defect_summary["V"] += counts.get("V", 0)
                         defect_summary["total_defects"] += counts.get("V", 0) + counts.get("S", 0) + counts.get("D", 0)
+                        # increment defect frame counters
+                        defect_summary["defect_frames"] = defect_summary.get("defect_frames", 0) + 1
+                        defect_summary["total_defective_frames"] = defect_summary.get("total_defective_frames", 0) + 1
                         mq_obj.publish("ui/logic", defect_summary)
                 else:
                     folder = "NODEFECT"
@@ -247,7 +418,7 @@ def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_s
 
                     with summary_lock:
                         defect_summary["processed_at"] = datetime.now().isoformat()
-                        defect_summary["severity"] = severity
+                        defect_summary["last_severity"] = severity
                         defect_summary["distance"] = distance
                         mq_obj.publish("ui/logic", defect_summary)
 
@@ -265,7 +436,22 @@ def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_s
                     "s": severity,
                     **boxes,
                     "t": counts,
+                    "img": save_path,
                 }
+
+                # increment total frames processed
+                try:
+                    with summary_lock:
+                        defect_summary["total_frames"] = defect_summary.get("total_frames", 0) + 1
+                        results.append(defect_json)
+                except Exception:
+                    pass
+
+                # update live.json with final summary and results
+                try:
+                    update_live_json(cycle_uid, defect_summary, results=results, status="inprogress")
+                except Exception:
+                    pass
 
             except Exception as e:
                 print(f"Error processing {image_name}: {e}")
@@ -274,12 +460,18 @@ def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_s
         except Exception as e:
             print(f"Error processing {image_name}: {e}")
 
-    return defect_json
+    return results
 
 def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
     date_str = datetime.now().strftime('%Y%m%d')
     conn = getDBconn()
+
+    try:
+        coil_id = get_coil_id_from_millruns(conn, cycle_uid)
+    except Exception:
+        coil_id = ""
+
     if not os.path.exists(base_path):
         return
     
@@ -287,9 +479,11 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     results = []
     defect_summary = {
         "cycle_uid": cycle_uid,
+        "coil_id": coil_id,
         "total_frames": 0,
         "total_defects": 0,
         "defect_frames": 0,
+        "total_defective_frames": 0,
         "D": 0, "V": 0, "S":0,
     }
 
@@ -299,13 +493,12 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
 
         # Split into two halves, preserving original rank (1-based)
         ranked_images = list(enumerate(image_list, start=1))
-        mid = len(ranked_images) // 2
-        first_half  = ranked_images[:mid]
-        second_half = ranked_images[mid:]
+        first_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 1]
+        second_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 0]
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(process_images, cycle_uid, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj)
-            future_2 = executor.submit(process_images, cycle_uid, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj)
+            future_1 = executor.submit(process_images, cycle_uid, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results)
+            future_2 = executor.submit(process_images, cycle_uid, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results)
             
             results_1 = future_1.result()
             results.append(results_1)
@@ -317,6 +510,7 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
 
     defect_json = {
         "cycle_uid": cycle_uid,
+        "coil_id": coil_id,
         "result": results
     }
 
@@ -351,13 +545,20 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     print("New JSON file created successfully.")
 
     img_dir = os.path.join(RESULT_PATH, date_str, cycle_uid)
-    # save_defect_history(conn, cycle_uid, json.dumps(defect_summary), img_dir, json_path)
+    save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), img_dir, json_path)
+
+    # update live.json with final summary and results
+    try:
+        update_live_json(cycle_uid, defect_summary, results=results, status="completed")
+    except Exception:
+        pass
 
     defect_summary = {
         "cycle_uid": "",
         "total_frames": 0,
         "total_defects": 0,
         "defect_frames": 0,
+        "total_defective_frames": 0,
         "D": 0, "V": 0, "S":0,
     }
 
@@ -378,6 +579,54 @@ def get_size(folder):
         for f in files:
             total += os.path.getsize(os.path.join(root, f))
     return total
+
+def update_live_json(cycle_uid=None, defect_summary=None, results=None, status="processing"):
+    try:
+        data = {}
+        if os.path.exists(LIVE_JSON_PATH):
+            try:
+                with open(LIVE_JSON_PATH, "r") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+
+        # Default template
+        if not data:
+            data = {
+                "status": status,
+                "cycle_uid": cycle_uid or "",
+                "coil_length_mm": 12000000,
+                "current_position_mm": 0,
+                "speed_mpm": 0,
+                "total_defects": 0,
+                "total_frames": 0,
+                "total_defective_frames": 0,
+                "start_time": datetime.now().isoformat(),
+                "last_updated": datetime.now().isoformat(),
+                "result": []
+            }
+
+        # Update fields
+        data["status"] = status
+        if cycle_uid:
+            data["cycle_uid"] = cycle_uid
+
+        if defect_summary:
+            data["total_defects"] = defect_summary.get("total_defects", data.get("total_defects", 0))
+            data["total_frames"] = defect_summary.get("total_frames", data.get("total_frames", 0))
+            data["total_defective_frames"] = defect_summary.get("total_defective_frames", defect_summary.get("defect_frames", data.get("total_defective_frames", 0)))
+
+        if results is not None:
+            data["result"] = results
+
+        data["last_updated"] = datetime.now().isoformat()
+
+        os.makedirs(os.path.dirname(LIVE_JSON_PATH), exist_ok=True)
+        with open(LIVE_JSON_PATH, "w") as f:
+            json.dump(data, f, indent=4)
+
+    except Exception:
+        logger.error(f"Failed to update live json: {traceback.format_exc()}")
 
 def main():
 

@@ -437,55 +437,40 @@ def health_status(request):
 
 @csrf_exempt
 def get_current_status(request):
+    # Prefer live.json from DEBUGS/TEMP_JSON if available
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        live_path = os.path.join(root, "DEBUGS", "TEMP_JSON", "live.json")
+        if os.path.exists(live_path):
+            with open(live_path, "r") as fp:
+                data = json.load(fp)
 
-    data = {
-        "status": "processing",
-        "cycle_uid": "ROLL_20260605190003",
-        "coil_id": "COIL_123",
+            # Ensure required keys and defaults
+            data.setdefault("coil_length_mm", 12000000)
+            data.setdefault("current_position_mm", 0)
+            data.setdefault("speed_mpm", 0)
+            data.setdefault("total_defects", 0)
+            data.setdefault("total_frames", 0)
+            data.setdefault("total_defective_frames", 0)
+            data.setdefault("status", "idle")
+            data.setdefault("result", [])
 
-        "total_defects": 8,
-        "total_frames": 20,
-        "total_defective_frames": 4,
+            return JsonResponse(data)
+    except Exception:
+        pass
 
-        "result": [
+    # Fallback sample data
+    # sample = {
+    #     "status": "processing",
+    #     "cycle_uid": "ROLL_SAMPLE",
+    #     "coil_id": "COIL_SAMPLE",
+    #     "coil_length_mm": 12000000,
+    #     "current_position_mm": 0,
+    #     "speed_mpm": 0,
+    #     "total_defects": 0,
+    #     "total_frames": 0,
+    #     "total_defective_frames": 0,
+    #     "result": []
+    # }
 
-            {
-                "r": 1,
-                "l": "346951",
-                "s": "LOW",
-                "t": {},
-                "img": "/home/omkar/INSIGHTZZ/PROJECTS/TALOJA/SURFACE_INSPECTION_TALOJA/WEB_APP/static/img/nocam.jpg"
-            },
-
-            {
-                "r": 2,
-                "l": "347946",
-                "s": "MEDIUM",
-                "t": {"V": 3},
-                "img": "/home/omkar/INSIGHTZZ/PROJECTS/TALOJA/SURFACE_INSPECTION_TALOJA/WEB_APP/static/img/nocam.jpg"
-            },
-
-            {
-                "r": 3,
-                "l": "348100",
-                "s": "HIGH",
-                "t": {
-                    "V": 2,
-                    "D": 4
-                },
-                "img": "/home/omkar/INSIGHTZZ/PROJECTS/TALOJA/SURFACE_INSPECTION_TALOJA/WEB_APP/static/img/nocam.jpg"
-            },
-
-            {
-                "r": 4,
-                "l": "349000",
-                "s": "LOW",
-                "t": {
-                    "D": 1
-                },
-                "img": "/home/omkar/INSIGHTZZ/PROJECTS/TALOJA/SURFACE_INSPECTION_TALOJA/WEB_APP/static/img/nocam.jpg"
-            }
-        ]
-    }
-
-    return JsonResponse(data)
+    # return JsonResponse(sample)
