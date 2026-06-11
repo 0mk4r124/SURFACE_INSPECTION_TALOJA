@@ -36,6 +36,7 @@ db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
 PADDING = 50
 summary_lock = Lock()
+result_lock = Lock()
 ALLOWED_DEFECTS = {"D", "V", "S"}
 DEFECT_CONFIG = {
     "V": {"name": "VIBRATION", "color": (255, 0, 0)},      # Blue
@@ -61,7 +62,7 @@ def getDBconn():
 
     return conn
 
-def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json_path):
+def save_defect_history(conn, cycle_uid, coil_id, defect_details, json_path):
     cursor = None
 
     try:
@@ -84,7 +85,6 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json
                 UPDATE DEFECTS_HISTORY
                 SET COIL_ID = %s,
                     DEFECT_DETAILS = %s,
-                    IMG_PATH = %s,
                     JSON_PATH = %s,
                     CREATE_TIME = %s
                 WHERE CYCLE_UID = %s
@@ -93,7 +93,6 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json
             cursor.execute(update_query, (
                 coil_id,
                 defect_details,
-                img_path,
                 json_path,
                 datetime.now(),
                 cycle_uid
@@ -103,7 +102,7 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json
 
             insert_query = """
                 INSERT INTO DEFECTS_HISTORY
-                (CYCLE_UID, COIL_ID, DEFECT_DETAILS, IMG_PATH, JSON_PATH, CREATE_TIME)
+                (CYCLE_UID, COIL_ID, DEFECT_DETAILS, JSON_PATH, CREATE_TIME)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
 
@@ -111,7 +110,6 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json
                 cycle_uid,
                 coil_id,
                 defect_details,
-                img_path,
                 json_path,
                 datetime.now()
             ))
@@ -127,9 +125,9 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, img_path, json
             cursor.close()
 
 def get_coil_id_from_millruns(conn, cycle_uid):
-    """Return coil_id from MILL_RUNS for given cycle_uid, or empty string if not found."""
     if conn is None:
         return ""
+    
     cursor = None
     try:
         cursor = conn.cursor()
@@ -143,6 +141,7 @@ def get_coil_id_from_millruns(conn, cycle_uid):
     finally:
         if cursor:
             cursor.close()
+            
     return ""
 
 def get_sorted_images(folder):
@@ -367,7 +366,7 @@ def add_summary(img, counts, severity):
 
     return img
 
-def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results):
+def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results):
     defect_json, counts = {}, {}
     date_str = datetime.now().strftime('%Y%m%d')
 
@@ -443,13 +442,14 @@ def process_images(cycle_uid, cam_path, image_items, model, cam_serial, defect_s
                 try:
                     with summary_lock:
                         defect_summary["total_frames"] = defect_summary.get("total_frames", 0) + 1
+                    with result_lock:
                         results.append(defect_json)
                 except Exception:
                     pass
 
                 # update live.json with final summary and results
                 try:
-                    update_live_json(cycle_uid, defect_summary, results=results, status="inprogress")
+                    update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="inprogress")
                 except Exception:
                     pass
 
@@ -497,14 +497,11 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
         second_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 0]
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(process_images, cycle_uid, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results)
-            future_2 = executor.submit(process_images, cycle_uid, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results)
+            future_1 = executor.submit(process_images, cycle_uid, coil_id, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results)
+            future_2 = executor.submit(process_images, cycle_uid, coil_id, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results)
             
-            results_1 = future_1.result()
-            results.append(results_1)
-            
-            results_2 = future_2.result()
-            results.append(results_2)
+            future_1.result()
+            future_2.result()
 
     print(f"Cycle Done")
 
@@ -545,11 +542,11 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     print("New JSON file created successfully.")
 
     img_dir = os.path.join(RESULT_PATH, date_str, cycle_uid)
-    save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), img_dir, json_path)
+    save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), json_path)
 
     # update live.json with final summary and results
     try:
-        update_live_json(cycle_uid, defect_summary, results=results, status="completed")
+        update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="completed")
     except Exception:
         pass
 
@@ -564,8 +561,8 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
 
     # ---- MOVE TO TRASH ---- #
     trash_dest = os.path.join(TRASH_PATH, cycle_uid)
+    if os.path.exists(trash_dest): shutil.rmtree(trash_dest)
     shutil.move(base_path, trash_dest)
-    print(f"Moved to TRASH: {cycle_uid}")
 
 def is_folder_stable(folder):
     size1 = get_size(folder)
@@ -580,7 +577,7 @@ def get_size(folder):
             total += os.path.getsize(os.path.join(root, f))
     return total
 
-def update_live_json(cycle_uid=None, defect_summary=None, results=None, status="processing"):
+def update_live_json(cycle_uid=None, coil_id=None, defect_summary=None, results=None, status="processing"):
     try:
         data = {}
         if os.path.exists(LIVE_JSON_PATH):
@@ -610,8 +607,11 @@ def update_live_json(cycle_uid=None, defect_summary=None, results=None, status="
         data["status"] = status
         if cycle_uid:
             data["cycle_uid"] = cycle_uid
+        if coil_id:
+            data["coil_id"] = coil_id
 
         if defect_summary:
+            data["current_position_mm"] = defect_summary.get("distance", data.get("distance", 0))
             data["total_defects"] = defect_summary.get("total_defects", data.get("total_defects", 0))
             data["total_frames"] = defect_summary.get("total_frames", data.get("total_frames", 0))
             data["total_defective_frames"] = defect_summary.get("total_defective_frames", defect_summary.get("defect_frames", data.get("total_defective_frames", 0)))

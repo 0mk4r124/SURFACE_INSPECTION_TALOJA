@@ -283,10 +283,7 @@ document.addEventListener('click', function(e) {
     if (!img || !img.src) return;
 
     document.getElementById("vehicle_number").innerHTML = `Live Cam`;
-    const modalEl = document.getElementById('imageModal');
-    modalEl.dataset.src = img.src;
-    const modal = new bootstrap.Modal(modalEl);
-    modal.show();
+    updateImageModal(img.src, 'Live Cam');
 });
 
     if(!btn) return;
@@ -322,13 +319,8 @@ document.addEventListener('click', function (e) {
 
     const vehicle_number = btn.dataset.vehicle_number;
     const imgSrc = btn.dataset.src;
-    document.getElementById("vehicle_number").innerHTML = `Vehicle Number: <b>${vehicle_number}</b>`;
-
-    const modalEl = document.getElementById('imageModal');
-    modalEl.dataset.src = imgSrc;
-
-    const modal = new bootstrap.Modal(modalEl);
-    modal.show();
+    const title = `Vehicle Number: <b>${vehicle_number}</b>`;
+    updateImageModal(imgSrc, title);
 });
 
 document.getElementById("imageModal")
@@ -340,6 +332,7 @@ document.getElementById("imageModal")
         img.src = "";
         img.style.display = "none";
         loader.style.display = "none";
+    modalOpen = false;
 });
 
 document.getElementById("imageModal")
@@ -369,7 +362,46 @@ document.getElementById("imageModal")
     };
 
     img.src = src;
+    modalOpen = true;
 });
+
+// Update or open image modal without creating multiple stacked modals
+function updateImageModal(imgUrl, title) {
+    const modalEl = document.getElementById('imageModal');
+    if (!modalEl) return;
+    const img = document.getElementById('modalImage');
+    const loader = document.getElementById('imageLoader');
+
+    if (title) document.getElementById('vehicle_number').innerHTML = title;
+    modalEl.dataset.src = imgUrl || '';
+
+    // If modal is not open, show it (shown handler will load image)
+    if (!modalOpen) {
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+        return;
+    }
+
+    // If modal already open, load new image in-place
+    if (!imgUrl) return;
+    isImageLoading = true;
+    loader.style.display = 'block';
+    img.style.display = 'none';
+
+    img.onload = function () {
+        loader.style.display = 'none';
+        img.style.display = 'block';
+        isImageLoading = false;
+    };
+
+    img.onerror = function () {
+        loader.style.display = 'none';
+        img.style.display = 'none';
+        isImageLoading = false;
+    };
+
+    img.src = imgUrl;
+}
 
 function updateDefectMap() {
     const defectData = {
@@ -508,41 +540,41 @@ function updateCameraImages() {
         .catch(err => console.error("Error fetching camera images:", err));
 }
 
-async function fetchCurrentStatus() {
+// async function fetchCurrentStatus() {
 
-    try {
+//     try {
 
-        const response = await fetch("/api/get_current_status/");
-        const data = await response.json();
+//         const response = await fetch("/api/get_current_status/");
+//         const data = await response.json();
 
-            // If the UI already shows 'PROCESSING', do not overwrite/update
-            const currentStateEl = document.getElementById("currentState");
-            if (currentStateEl) {
-                const visibleState = (currentStateEl.innerText || "").trim().toLowerCase();
-                if (visibleState === "processing") {
-                    // skip applying updates while currently processing
-                    return;
-                }
-            }
+//             // If the UI already shows 'PROCESSING', do not overwrite/update
+//             const currentStateEl = document.getElementById("currentState");
+//             if (currentStateEl) {
+//                 const visibleState = (currentStateEl.innerText || "").trim().toLowerCase();
+//                 if (visibleState === "processing") {
+//                     // skip applying updates while currently processing
+//                     return;
+//                 }
+//             }
 
-            document.getElementById("currentState").innerText =
-                data.status.toUpperCase();
+//             document.getElementById("currentState").innerText =
+//                 data.status.toUpperCase();
 
-        document.getElementById("coil_id").innerText =
-            data.coil_id;
+//         document.getElementById("coil_id").innerText =
+//             data.coil_id;
 
-        document.getElementById("cycle_uid").innerText =
-            data.cycle_uid;
+//         document.getElementById("cycle_uid").innerText =
+//             data.cycle_uid;
 
-        updateDefectSummary(data);
+//         updateDefectSummary(data);
 
-        renderDefectGraph(data.result);
+//         renderDefectGraph(data.result);
 
-    }
-    catch(err){
-        console.error(err);
-    }
-}
+//     }
+//     catch(err){
+//         console.error(err);
+//     }
+// }
 
 function updateDefectSummary(data){
 
@@ -579,7 +611,7 @@ function renderDefectGraph(results){
 
     results.forEach(item => {
 
-        const lengthPos = Number(item.l);
+        const lengthPos = Number(item.l) / 1000; // convert to meters
 
         Object.entries(item.t || {}).forEach(([defect,count]) => {
 
@@ -609,7 +641,7 @@ function renderDefectGraph(results){
                     frame: item.r,
                     severity: item.s,
                     defect: defect,
-                    length: item.l,
+                    length: (Number(item.l) / 1000),
                     image: item.img
                 });
             }
@@ -628,7 +660,7 @@ function renderDefectGraph(results){
         },
 
         xaxis: {
-            title: "Length (mm)"
+            title: "Length (m)"
         },
 
         yaxis: {
@@ -669,7 +701,7 @@ function renderDefectGraph(results){
             "<b>Defect:</b> %{customdata.defect}<br>" +
             "<b>Frame:</b> %{customdata.frame}<br>" +
             "<b>Severity:</b> %{customdata.severity}<br>" +
-            "<b>Length:</b> %{customdata.length}<br>" +
+            "<b>Length (m):</b> %{customdata.length}<br>" +
             "<extra></extra>";
     });
 }
@@ -1096,10 +1128,61 @@ function updateSIDashboard(data) {
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
     set('siCoilId',    data.coil_id   || '?');
-    set('siCycleUid',  (data.cycle_uid || '?').slice(-16));  /* truncate long UIDs */
-    set('siSpeed',     data.speed_mpm ? `${data.speed_mpm} m/min` : '? m/min');
-    set('siPosition',  (curPos / 1000000).toFixed(3) + ' km');
-    set('siCoverage',  coilLen > 0 ? ((curPos / coilLen) * 100).toFixed(1) + '%' : '0.0%');
+    // set('siCycleUid',  (data.cycle_uid || '?').slice(-16));  /* truncate long UIDs */
+    // Frames per second (computed from total_frames and start_time if available)
+    try {
+        let fpsText = '? fps';
+        if (data.total_frames && data.start_time) {
+            const started = new Date(data.start_time).getTime();
+            const now = Date.now();
+            const elapsedSec = Math.max(1, (now - started) / 1000.0);
+            const fps = Number(data.total_frames) / elapsedSec;
+            fpsText = `${fps.toFixed(2)} fps`;
+        } else if (data.speed_mpm !== undefined && data.speed_mpm !== null) {
+            // fallback: show original speed value if frames/sec cannot be computed
+            fpsText = `${data.speed_mpm} m/min`;
+        }
+        set('siSpeed', fpsText);
+    } catch (e) { set('siSpeed', '? fps'); }
+
+    // Position: display the raw length value in meters
+    set('siPosition', `${(Number(curPos) / 1000).toFixed(3)} m`);
+
+    // Coverage: compute distance from current position to the next defect
+    // try {
+    //     const flat = Array.isArray(data.result) ? data.result.flat(Infinity).filter(Boolean) : [];
+    //     const positions = [];
+
+    //     flat.forEach(it => {
+    //         // frame-level position (mm)
+    //         const framePos = Number(it.l || it.length || it.position || 0) || 0;
+    //         if (framePos > 0) positions.push(framePos);
+
+    //         // per-box positions (prefer pos_mm when available)
+    //         ['V','D','S','C'].forEach(type => {
+    //             const boxes = it[type];
+    //             if (Array.isArray(boxes)) {
+    //                 boxes.forEach(b => {
+    //                     const p = Number((b && (b.pos_mm || b.pos || b[4])) || 0) || 0;
+    //                     if (p > 0) positions.push(p);
+    //                 });
+    //             }
+    //         });
+    //     });
+
+    //     // find the nearest defect position strictly after current position
+    //     const cur = Number(curPos) || 0;
+    //     let nextPos = Infinity;
+    //     positions.forEach(p => { if (p > cur && p < nextPos) nextPos = p; });
+
+    //     let coverageVal = 0;
+    //     if (nextPos !== Infinity) coverageVal = Math.max(0, nextPos - cur);
+
+    //     // show coverage in meters (distance to next defect)
+    //     set('siCoverage', `${(coverageVal / 1000).toFixed(3)} m`);
+    // } catch (e) {
+    //     set('siCoverage', '0.000 m');
+    // }
     set('siCoilLen',   (coilLen / 1000000).toFixed(1) + ' km total');
     set('siUpdated',   data.last_updated ? new Date(data.last_updated).toLocaleTimeString() : '?');
 
@@ -1130,6 +1213,13 @@ function updateSIDashboard(data) {
                 .join('');
         }
     }
+
+    // Update individual defect-type tiles (new layout)
+    const setType = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = (val || 0); };
+    setType('siStatV', types['V'] || 0);
+    setType('siStatD', types['D'] || 0);
+    setType('siStatS', types['S'] || 0);
+    setType('siStatC', types['C'] || 0);
 
     /* coil map */
     if (siCoilMap) {
@@ -1176,7 +1266,9 @@ function renderDefectGraphDark(results) {
             }
 
             boxes.forEach(box => {
-                const pos = (box.pos_mm !== undefined) ? Number(box.pos_mm) : (Number(item.l) || 0);
+                // convert to meters
+                const posMm = (box.pos_mm !== undefined) ? Number(box.pos_mm) : (Number(item.l) || 0);
+                const pos = posMm / 1000;
                 traces[defect].x.push(pos);
                 traces[defect].y.push(defect);
                 traces[defect].customdata.push({ frame: item.r, severity: item.s, defect, length: pos, image: item.img });
@@ -1189,7 +1281,7 @@ function renderDefectGraphDark(results) {
             '<b>Defect:</b> %{customdata.defect}<br>' +
             '<b>Frame:</b> %{customdata.frame}<br>' +
             '<b>Severity:</b> %{customdata.severity}<br>' +
-            '<b>Position:</b> %{customdata.length} mm<br><extra></extra>';
+            '<b>Position (m):</b> %{customdata.length}<br><extra></extra>';
     });
 
     const plotData = Object.values(traces);
@@ -1205,7 +1297,7 @@ function renderDefectGraphDark(results) {
         margin:        { l: 50, r: 14, t: 8, b: 44 },
         height:        camW,
         xaxis: {
-            title: { text: 'Position (mm)', font: { color: '#485060', size: 10 } },
+            title: { text: 'Position (m)', font: { color: '#485060', size: 10 } },
             gridcolor:  '#161b22',
             linecolor:  '#21262d',
             tickcolor:  '#21262d',

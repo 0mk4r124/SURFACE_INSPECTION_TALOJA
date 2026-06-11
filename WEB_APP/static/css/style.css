@@ -389,6 +389,8 @@ body {
 }
 
 .si-chip {
+    width: max-content;
+    margin-left: 10px;
     display: flex;
     flex-direction: column;
     gap: 1px;

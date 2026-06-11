@@ -115,8 +115,8 @@ def main():
                 continue
 
             diameter = data.get("diameter")
-            light = data.get("value")
-
+            light = data.get("light")
+            
             plc_writer.update(diameter, light)
             print(f"DIAMETER : {diameter} | LIGHT : {light} | {datetime.now()}")
 

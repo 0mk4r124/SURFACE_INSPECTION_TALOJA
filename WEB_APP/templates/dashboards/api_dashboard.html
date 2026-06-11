@@ -45,10 +45,10 @@
                         <span class="si-chip-label">COIL ID</span>
                         <span class="si-chip-value si-mono" id="siCoilId">?</span>
                     </div>
-                    <div class="si-chip">
+                    <!-- <div class="si-chip">
                         <span class="si-chip-label">CYCLE UID</span>
                         <span class="si-chip-value si-mono" id="siCycleUid">?</span>
-                    </div>
+                    </div> -->
                 </div>
                 <!-- right-side status removed from top; moved to bottom stats panel -->
             </div>
@@ -103,44 +103,67 @@
                     <div class="si-panel-label">LIVE STATS</div>
                     <div class="si-stats-vertical">
                             <div class="si-insights">
-                                <div class="si-insight-title">INSIGHTZZ</div>
                                 <div class="si-insight-row"><strong id="ins-top-type">Top: -</strong></div>
                                 <div class="si-insight-row">Last Defect: <span id="ins-last-pos">-</span></div>
                                 <div class="si-insight-row">Avg Severity: <span id="ins-avg-sev">-</span></div>
                             </div>
+
                             <div class="si-chips-bottom">
                                 <div class="si-chip">
                                     <span class="si-chip-label">SPEED</span>
                                     <span class="si-chip-value si-mono" id="siSpeed">-- m/min</span>
                                 </div>
                                 <div class="si-chip">
-                                    <span class="si-chip-label">POSITION</span>
+                                    <span class="si-chip-label">LENGTH</span>
                                     <span class="si-chip-value si-mono" id="siPosition">0.000 km</span>
                                 </div>
-                                <div class="si-chip">
+                                <!-- <div class="si-chip">
                                     <span class="si-chip-label">COVERAGE</span>
                                     <span class="si-chip-value si-mono" id="siCoverage">0.0%</span>
-                                </div>
+                                </div> -->
                                 <div class="si-chip">
                                     <span class="si-chip-label">UPDATED</span>
-                                    <span class="si-chip-value si-mono" id="siUpdated">?</span>
+                                    <span class="si-chip-value si-mono" id="siUpdated">--</span>
                                 </div>
                             </div>
-                        <div class="si-stat-tile">
-                            <div class="si-stat-num si-mono" id="siStatFrames">0</div>
-                            <div class="si-stat-lbl">FRAMES</div>
-                        </div>
-                        <div class="si-stat-tile si-stat-amber">
-                            <div class="si-stat-num si-mono" id="siStatDefFrames">0</div>
-                            <div class="si-stat-lbl">DEFECT FRAMES</div>
-                        </div>
-                        <div class="si-stat-tile si-stat-red">
-                            <div class="si-stat-num si-mono" id="siStatDefects">0</div>
-                            <div class="si-stat-lbl">DEFECTS</div>
-                        </div>
-                        <div class="si-stat-tile si-stat-types" id="siStatTypes">
-                            <div class="si-stat-lbl" style="margin:auto 0; color:#3d444d">NO DEFECTS YET</div>
-                        </div>
+
+                            <div class="si-stat-split d-flex" style="gap:12px;">
+                                <div class="si-stat-left" style="flex:1;">
+                                    <div class="si-stat-tile">
+                                        <div class="si-stat-num si-mono" id="siStatFrames">0</div>
+                                        <div class="si-stat-lbl">FRAMES</div>
+                                    </div>
+                                    <div class="si-stat-tile si-stat-amber">
+                                        <div class="si-stat-num si-mono" id="siStatDefFrames">0</div>
+                                        <div class="si-stat-lbl">DEFECT FRAMES</div>
+                                    </div>
+                                    <div class="si-stat-tile si-stat-red">
+                                        <div class="si-stat-num si-mono" id="siStatDefects">0</div>
+                                        <div class="si-stat-lbl">DEFECTS</div>
+                                    </div>
+                                </div>
+                                <div class="si-stat-right" style="flex:1;">
+                                    <div class="si-stat-types-grid d-flex flex-wrap" style="gap:8px;">
+                                        <div class="si-stat-tile si-stat-type" id="siTypeV" style="flex:1 1 48%;">
+                                            <div class="si-stat-num si-mono" id="siStatV">0</div>
+                                            <div class="si-stat-lbl">Vibration</div>
+                                        </div>
+                                        <div class="si-stat-tile si-stat-type" id="siTypeD" style="flex:1 1 48%;">
+                                            <div class="si-stat-num si-mono" id="siStatD">0</div>
+                                            <div class="si-stat-lbl">Dent</div>
+                                        </div>
+                                        <div class="si-stat-tile si-stat-type" id="siTypeS" style="flex:1 1 48%;">
+                                            <div class="si-stat-num si-mono" id="siStatS">0</div>
+                                            <div class="si-stat-lbl">Sliver</div>
+                                        </div>
+                                        <div class="si-stat-tile si-stat-type" id="siTypeC" style="flex:1 1 48%;">
+                                            <div class="si-stat-num si-mono" id="siStatC">0</div>
+                                            <div class="si-stat-lbl">Scratch</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
                     </div>
                 </div>
 

@@ -66,13 +66,13 @@ class MILL_RUNS(models.Model):
     capture_duration_sec = models.FloatField(db_column='CAPTURE_DURATION_SEC', blank=True, null=True)
     processing_duration_sec = models.FloatField(db_column='PROCESSING_DURATION_SEC', blank=True, null=True)
     total_cycle_duration_sec = models.FloatField(db_column='TOTAL_CYCLE_DURATION_SEC', blank=True, null=True)
-    image_count = models.PositiveIntegerField(db_column='IMAGE_COUNT', default=0)
-    defect_count = models.PositiveIntegerField(db_column='DEFECT_COUNT', default=0)
+    image_count = models.PositiveIntegerField(db_column='IMAGE_COUNT', default=0, blank=True, null=True)
+    defect_count = models.PositiveIntegerField(db_column='DEFECT_COUNT', default=0, blank=True, null=True)
     fps = models.FloatField(db_column='FPS', blank=True, null=True)
     exposure = models.FloatField(db_column='EXPOSURE', blank=True, null=True)
     coil_meta = models.JSONField(db_column='COIL_META', blank=True, null=True)
-    status = models.CharField(db_column='STATUS', max_length=20, default='RUNNING')
-    created_at = models.DateTimeField(db_column='CREATED_AT', default=timezone.now)
+    status = models.CharField(db_column='STATUS', max_length=20, default='RUNNING', blank=True, null=True)
+    created_at = models.DateTimeField(db_column='CREATED_AT', default=timezone.now, blank=True, null=True)
 
     class Meta:
         managed = True
@@ -96,6 +96,7 @@ class DEFECTS_HISTORY(models.Model):
     id = models.AutoField(db_column='ID', primary_key=True)
     cycle_uid = models.CharField(db_column='CYCLE_UID', max_length=50)
     coil_id = models.CharField(db_column='COIL_ID', max_length=100)
+    defect_details = models.CharField(db_column='DEFECT_DETAILS', max_length=3000)
     json_path = models.CharField(db_column='JSON_PATH', max_length=500)
     create_time = models.DateTimeField(db_column='CREATE_TIME', auto_now_add=True)
 
