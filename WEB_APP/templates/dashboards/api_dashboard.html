@@ -8,11 +8,11 @@
 </div>
 
 <!-- Tabs -->
-<div class="d-flex align-items-center w-100" style="margin-left:13px; margin-top:-22px;">
+<div class="d-flex align-items-center w-100" style="margin-left:13px; margin-top:-30px;">
     <!-- Left Tabs -->
     <ul class="nav nav-tabs flex-grow-1" style="padding: 7px;">
         <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#DASHBOARD">DASHBOARD</button>
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#DASHBOARD">DASHBOARD</button>
         </li>
         <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#HISTORY">HISTORY</button>
@@ -61,25 +61,35 @@
                         <span class="si-coil-len" id="siCoilLen">8.5 km total</span>
                     </div>
                     <div class="si-legend">
-                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#00b4d8"></span>Vibration</span>
-                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#ff4757"></span>Dent</span>
-                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#2ed573"></span>Sliver</span>
-                        <span class="si-leg-item"><span class="si-leg-dot" style="background:#ffa502"></span>Scratch</span>
-                        <button class="si-btn-reset" id="siZoomReset">RESET ZOOM</button>
-                        <div class="si-filter-controls">
-                            <button class="si-filter-btn active" data-type="ALL">All</button>
-                            <button class="si-filter-btn active" data-type="V">V</button>
-                            <button class="si-filter-btn active" data-type="D">D</button>
-                            <button class="si-filter-btn active" data-type="S">S</button>
-                            <button class="si-filter-btn active" data-type="C">C</button>
+                        <div class="defect-filters">
+                            <button class="defect-filter-btn active" data-type="V" style="background:#007bff;">Vibration (V)</button>
+                            <button class="defect-filter-btn active" data-type="D" style="background:#dc3545;">Dent (D)</button>
+                            <button class="defect-filter-btn active" data-type="S" style="background:#28a745;">Sliver (S)</button>
+                            <button class="defect-filter-btn active" data-type="C" style="background:#fd7e14;">Scratch (C)</button>
                         </div>
                     </div>
                 </div>
                 <div class="si-canvas-wrap">
-                    <canvas id="siCoilCanvas" style="width:100%; height:150px; display:block;"></canvas>
+
+
+                    <div id="coilMapWrapper">
+                        <canvas id="coilMap"></canvas>
+                        <div id="mapTooltip"></div>
+                    </div>
+
+                    <!-- <div class="coilYAxis">
+                        <span>+150</span>
+                        <span>0</span>
+                        <span>-150</span>
+                    </div> -->
+
+                    <div id="coilXAxis">
+                        <span id="coilStart">0 mm</span>
+                        <span id="coilEnd">0 mm</span>
+                    </div>
+
                     <div id="siCoilTooltip" class="si-tooltip"></div>
                 </div>
-                <div class="si-scanner-hint">Scroll to zoom || Drag to pan || Click spike to view defect image</div>
             </div>
     
             <!-- STATS ROW removed; stats moved alongside live camera -->
@@ -102,17 +112,17 @@
                 <div class="si-stats-panel">
                     <div class="si-panel-label">LIVE STATS</div>
                     <div class="si-stats-vertical">
-                            <div class="si-insights">
+                            <!-- <div class="si-insights">
                                 <div class="si-insight-row"><strong id="ins-top-type">Top: -</strong></div>
                                 <div class="si-insight-row">Last Defect: <span id="ins-last-pos">-</span></div>
                                 <div class="si-insight-row">Avg Severity: <span id="ins-avg-sev">-</span></div>
-                            </div>
+                            </div> -->
 
                             <div class="si-chips-bottom">
-                                <div class="si-chip">
+                                <!-- <div class="si-chip">
                                     <span class="si-chip-label">SPEED</span>
                                     <span class="si-chip-value si-mono" id="siSpeed">-- m/min</span>
-                                </div>
+                                </div> -->
                                 <div class="si-chip">
                                     <span class="si-chip-label">LENGTH</span>
                                     <span class="si-chip-value si-mono" id="siPosition">0.000 km</span>
@@ -186,48 +196,33 @@
                 <!-- Filters -->
                 <div class="row g-3 align-items-end mb-3">
 
-                    <!-- Calender -->
-                    <div class="col-md-2 d-flex align-items-start">
+                    <!-- Date Range -->
+                    <div class="col-md-3 d-flex align-items-start">
                         <div class="input-group">
                             <div class="input-group-prepend">
                                 <span class="input-group-text h-100"><i class="far fa-calendar-alt"></i></span>
-                                </span>
                             </div>
                             <input type="text" id="date_range" name="date_range" class="form-control"
-                                placeholder="Select Planned Date Range" autocomplete="off">
+                                placeholder="Select Date Range" autocomplete="off">
                         </div>
                     </div>
 
-                    <!-- Search Vehicle Number -->
+                    <!-- Search Coil ID -->
                     <div class="col-md-3 d-flex align-items-start">
                         <div class="input-group">
                             <div class="input-group-prepend">
                                 <span class="input-group-text h-100"><i class="fas fa-search"></i></span>
                             </div>
-                            <input type="text" id="vehicle_number_search" name="vehicle_number_search"
-                                class="form-control" placeholder="Search Vehicle Number" autocomplete="off">
+                            <input type="text" id="coil_id_search" name="coil_id_search"
+                                class="form-control" placeholder="Search Coil ID" autocomplete="off">
                         </div>
                     </div>
 
-                    <!-- Search Vendor Name -->
-                    <div class="col-md-3 d-flex align-items-start">
-                        <div class="input-group">
-                            <div class="input-group-prepend">
-                                <span class="input-group-text h-100"><i class="fas fa-search"></i></span>
-                            </div>
-                            <input type="text" id="vendor_name_search" name="vendor_name_search"
-                                class="form-control" placeholder="Search Vendor Name" autocomplete="off">
-                        </div>
+                    <div class="col-md-6 d-flex align-items-start gap-2">
+                        <button class="btn btn-success" onclick="fetchHistoryData()">Fetch Data</button>
+                        <button class="btn btn-outline-success" onclick="downloadHistoryData()">Download CSV</button>
                     </div>
 
-                    <div class="col-md-4 d-flex align-items-start row">
-                        <div class="col-md-6 d-flex align-items-center">
-                            <button class="btn btn-success mx-2 w-30" onclick="fetchHistoryData()">Fetch Data</button>
-                        </div>
-                        <div class="col-md-6 d-flex align-items-center">
-                            <button class="btn btn-success ms-5" onclick="downloadHistoryData()">Download CSV</button>
-                        </div>
-                    </div>
                 </div>
 
 
@@ -307,7 +302,7 @@
                 <div id="zoomWrapper" class="position-relative" style="overflow:hidden; width:100%; min-height:60vh; cursor:grab;">
                     <div id="imageLoader"
                         class="position-absolute top-50 start-50 translate-middle text-center"
-                        style="display:none; z-index:10;">
+                        style="display:none; z-index:9999;">
                         <div class="spinner-border text-primary" role="status">
                             <span class="visually-hidden">Loading...</span>
                         </div>
@@ -320,10 +315,108 @@
             <div class="modal-footer">
                 <div class="d-flex align-items-center w-100 justify-content-start">
                     <p class="m-2 text-primary" id="updateImageBtn"><strong>Note :</strong> Use scroll to zoom in and zoom out.</p>
+         
                 </div>
             </div>
         </div>
     </div>
 </div>
+<!-- Run Details Modal -->
+<div class="modal fade" id="runDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-fullscreen-lg-down">
+        <div class="modal-content" style="background:#0d1117; color:#e2e8f0; border:1px solid #1e293b;">
+
+            <div class="modal-header" style="border-bottom:1px solid #1e293b; padding:12px 20px;">
+                <div>
+                    <h5 class="modal-title mb-1" style="color:#e2e8f0; font-family:monospace;">RUN DETAILS</h5>
+                    <div class="d-flex flex-wrap gap-3" style="font-size:12px; color:#94a3b8; font-family:monospace;">
+                        <span>COIL ID: <strong id="rdCoilId" style="color:#f1c40f;">-</strong></span>
+                        <span>CYCLE UID: <strong id="rdCycleUid" style="color:#f1c40f;">-</strong></span>
+                        <span>DATE: <strong id="rdDatetime" style="color:#f1c40f;">-</strong></span>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+
+            <div class="modal-body p-3" style="background:#0d1117;">
+
+                <!-- Coil Defect Map -->
+                <div class="si-scanner-section mb-3">
+                    <div class="si-scanner-header">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="si-section-label">COIL DEFECT MAP</span>
+                            <span class="si-coil-len" id="rdCoilLen">-- km total</span>
+                        </div>
+                        <div class="si-legend">
+                            <div class="defect-filters">
+                                <button class="defect-filter-btn rd-filter-btn active" data-type="V" style="background:#007bff;">Vibration (V)</button>
+                                <button class="defect-filter-btn rd-filter-btn active" data-type="D" style="background:#dc3545;">Dent (D)</button>
+                                <button class="defect-filter-btn rd-filter-btn active" data-type="S" style="background:#28a745;">Sliver (S)</button>
+                                <button class="defect-filter-btn rd-filter-btn active" data-type="C" style="background:#fd7e14;">Scratch (C)</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="si-canvas-wrap">
+                        <div id="rdCoilMapWrapper" style="position:relative; width:100%;">
+                            <canvas id="rdCoilMap" style="width:100%; display:block;"></canvas>
+                            <div id="rdMapTooltip" style="display:none; position:fixed; z-index:9999; background:#1a1a2e; color:#eee; padding:8px 14px; border-radius:8px; font-size:12px; font-family:monospace; pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,0.5); border-left:4px solid #00b4d8;"></div>
+                        </div>
+                        <div id="rdCoilXAxis" style="display:flex; justify-content:space-between; font-size:11px; color:#64748b; padding:4px 2px; font-family:monospace;">
+                            <span id="rdCoilStart">0 mm</span>
+                            <span id="rdCoilEnd">0 mm</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats Row -->
+                <div class="si-stat-split d-flex" style="gap:12px;">
+                    <div style="flex:1;">
+                        <div class="si-stat-tile">
+                            <div class="si-stat-num si-mono" id="rdStatFrames">0</div>
+                            <div class="si-stat-lbl">FRAMES</div>
+                        </div>
+                        <div class="si-stat-tile si-stat-amber">
+                            <div class="si-stat-num si-mono" id="rdStatDefFrames">0</div>
+                            <div class="si-stat-lbl">DEFECT FRAMES</div>
+                        </div>
+                        <div class="si-stat-tile si-stat-red">
+                            <div class="si-stat-num si-mono" id="rdStatDefects">0</div>
+                            <div class="si-stat-lbl">DEFECTS</div>
+                        </div>
+                    </div>
+                    <div style="flex:1;">
+                        <div class="si-stat-types-grid d-flex flex-wrap" style="gap:8px;">
+                            <div class="si-stat-tile si-stat-type" style="flex:1 1 48%;">
+                                <div class="si-stat-num si-mono" id="rdStatV">0</div>
+                                <div class="si-stat-lbl">Vibration</div>
+                            </div>
+                            <div class="si-stat-tile si-stat-type" style="flex:1 1 48%;">
+                                <div class="si-stat-num si-mono" id="rdStatD">0</div>
+                                <div class="si-stat-lbl">Dent</div>
+                            </div>
+                            <div class="si-stat-tile si-stat-type" style="flex:1 1 48%;">
+                                <div class="si-stat-num si-mono" id="rdStatS">0</div>
+                                <div class="si-stat-lbl">Sliver</div>
+                            </div>
+                            <div class="si-stat-tile si-stat-type" style="flex:1 1 48%;">
+                                <div class="si-stat-num si-mono" id="rdStatC">0</div>
+                                <div class="si-stat-lbl">Scratch</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="modal-footer" style="border-top:1px solid #1e293b;">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- At the end of body, after all modals -->
+<div id="mapTooltip" style="display: none; position: fixed; z-index: 999; background: #1a1a2e; color: #eee; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-family: monospace; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); border-left: 4px solid #00b4d8;"></div>
 
 {% endblock %}

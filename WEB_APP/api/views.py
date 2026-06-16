@@ -61,33 +61,48 @@ def serve_file(request):
     if not file_param:
         return HttpResponse("File parameter missing", status=400)
 
-    # Direct decode (NO urlparse)
     file_path = unquote(file_param)
-
-    # Fix malformed paths
-    file_path = file_path.replace("c://", "c:/")
-    file_path = file_path.replace("//", "/")
     file_path = os.path.normpath(file_path)
 
-    print("FINAL PATH:", file_path)  # debug
+    # print("REQUESTED:", file_path)
+    # print("EXISTS:", os.path.exists(file_path))
 
     if os.path.exists(file_path):
         try:
+            file_size = os.path.getsize(file_path)
+            print("SIZE:", file_size)
+
+            if file_size == 0:
+                return HttpResponse("Empty file", status=404)
+
             ext = os.path.splitext(file_path)[1].lower()
-            content_type = 'image/jpeg' if ext in ['.jpg', '.jpeg'] else 'application/octet-stream'
-            return FileResponse(open(file_path, 'rb'), content_type=content_type)
+
+            content_type_map = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png'
+            }
+
+            return FileResponse(
+                open(file_path, 'rb'),
+                content_type=content_type_map.get(ext, 'application/octet-stream')
+            )
+
         except Exception as e:
-            return HttpResponse(f"Error reading file: {str(e)}", status=500)
-    else:
-        return HttpResponse(
-            f"Image file not found on this server: {file_path}",
-            status=404,
-            content_type='text/plain'
-        )
+            return HttpResponse(
+                f"Error reading file: {str(e)}",
+                status=500
+            )
+
+    return HttpResponse(
+        f"File not found: {file_path}",
+        status=404
+    )
     
 def live_ip_camera(request):
     try: 
         camera_paths = [
+            "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TEMP_IMG/TALOJA/24521939_debug.jpg",
             "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TEMP_IMG/TALOJA/24521939_debug.jpg",
         ]
         
@@ -173,10 +188,10 @@ def fetch_history_data(request):
 
             try:
 
-                if not row.defect_summary:
+                if not row.defect_details:
                     continue
 
-                summary = json.loads(row.defect_summary)
+                summary = json.loads(row.defect_details)
 
                 frame_has_defect = False
 
@@ -254,34 +269,62 @@ def get_run_details(request):
     cycle_uid = request.GET.get("cycle_uid")
 
     if not cycle_uid:
-        return JsonResponse(
-            {"error": "cycle_uid required"},
-            status=400
-        )
+        return JsonResponse({"error": "cycle_uid required"}, status=400)
 
-    defect_row = DEFECTS_HISTORY.objects.filter(
-        cycle_uid=cycle_uid
-    ).first()
+    # --- Try reading the cycle JSON file first ---
+    defect_row = DEFECTS_HISTORY.objects.filter(cycle_uid=cycle_uid).first()
 
-    if not defect_row:
-        return JsonResponse(
-            {"error": "data not found"},
-            status=404
-        )
+    if defect_row and defect_row.json_path and os.path.exists(defect_row.json_path):
+        try:
+            with open(defect_row.json_path, "r") as fp:
+                data = json.load(fp)
+            return JsonResponse(data)
+        except Exception:
+            pass  # fall through to DB construction below
 
-    try:
+    # --- Fallback: build response from DB rows ---
+    run = MILL_RUNS.objects.filter(cycle_uid=cycle_uid).first()
+    defect_rows = DEFECTS_HISTORY.objects.filter(cycle_uid=cycle_uid)
 
-        with open(defect_row.json_path, "r") as fp:
-            data = json.load(fp)
+    if not run and not defect_rows.exists():
+        return JsonResponse({"error": "data not found"}, status=404)
 
-        return JsonResponse(data)
+    result = []
+    total_defects = 0
+    total_defective_frames = 0
 
-    except Exception as e:
+    for row in defect_rows:
+        try:
+            summary = json.loads(row.defect_details) if row.defect_details else {}
+        except Exception:
+            summary = {}
 
-        return JsonResponse(
-            {"error": str(e)},
-            status=500
-        )
+        frame_defect_count = sum(summary.values())
+        total_defects += frame_defect_count
+        if frame_defect_count > 0:
+            total_defective_frames += 1
+
+        result.append({
+            "r": row.id,
+            "l": 0,          # length position not stored per-frame in DB
+            "t": summary,
+            "s": None,
+            "img": None,
+        })
+
+    data = {
+        "cycle_uid":              cycle_uid,
+        "coil_id":                run.coil_id if run else (defect_rows.first().coil_id if defect_rows.exists() else ""),
+        "coil_length_mm":         0,
+        "current_position_mm":    0,
+        "total_frames":           defect_rows.count(),
+        "total_defects":          total_defects,
+        "total_defective_frames": total_defective_frames,
+        "status":                 run.status if run else "COMPLETE",
+        "result":                 result,
+    }
+
+    return JsonResponse(data)
         
 @csrf_exempt
 def download_history_data(request):
@@ -354,7 +397,7 @@ def download_history_data(request):
             try:
 
                 defect_data = json.loads(
-                    row.defect_summary
+                    row.defect_details
                 )
 
                 frame_has_defect = False
@@ -398,6 +441,30 @@ def download_history_data(request):
         ])
 
     return response
+
+@csrf_exempt
+def download_run_json(request):
+    cycle_uid = request.GET.get("cycle_uid")
+    if not cycle_uid:
+        return JsonResponse({"error": "cycle_uid required"}, status=400)
+
+    defect_row = DEFECTS_HISTORY.objects.filter(
+        cycle_uid=cycle_uid
+    ).first()
+
+    if not defect_row:
+        return JsonResponse({"error": "data not found"}, status=404)
+
+    try:
+        filename = os.path.basename(defect_row.json_path)
+        response = FileResponse(
+            open(defect_row.json_path, "rb"),
+            content_type="application/json"
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 @csrf_exempt
 def health_status(request):

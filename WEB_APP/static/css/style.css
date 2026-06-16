@@ -405,7 +405,7 @@ body {
 }
 
 .si-chip-value {
-    font-size: 1rem;
+    font-size: 2rem;
     color: #16323b;
     font-weight: 600;
     white-space: nowrap;
@@ -644,7 +644,7 @@ body {
 #defectGraph { display: block; width: 100%; height: 300px; border: 1px solid #ddd; border-radius: 8px; background: white; }
 
 .si-panel-label {
-    font-size: 0.62rem;
+    font-size: 0.85rem;
     letter-spacing: 0.10em;
     color: #485060;
     text-transform: uppercase;
@@ -691,3 +691,87 @@ body {
 
 /* Make sure the DASHBOARD tab nav button shows as active when clicked */
 #DASHBOARD.active ~ .si-live-badge .si-live-dot { animation-play-state: running; }
+
+#coilMapContainer {
+    display: flex;
+    flex-direction: row;   /* IMPORTANT */
+    align-items: stretch;
+    width: 100%;
+    height: 250px;
+    background: #0f172a;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.coilYAxis {
+    width: 60px;
+    min-width: 60px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    background: #111827;
+    color: white;
+    font-size: 12px;
+}
+
+#coilMapWrapper {
+    flex: 1;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+#coilMap {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+#coilXAxis {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 60px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #000000;
+}
+
+#mapTooltip {
+    position: fixed;      /* or absolute, but fixed ensures it stays on top */
+    background: rgba(0, 0, 0, 0.85);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 999;        /* very high to stay above modals/canvas */
+    white-space: nowrap;
+    font-family: monospace;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    display: none;
+}
+
+.defect-filter-btn {
+    width: 150px;
+    height: 36px;
+    border-radius: 5px;
+    border: 2px solid white;
+    font-weight: bold;
+    color: white;
+    margin: 0 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.defect-filter-btn.active {
+    opacity: 1;
+    box-shadow: 0 0 0 2px white, 0 0 0 4px currentColor;
+}
+.defect-filter-btn:not(.active) {
+    opacity: 0.5;
+    background: transparent !important;
+    color: inherit;
+    border: 2px solid currentColor;
+}

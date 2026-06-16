@@ -35,6 +35,7 @@ db_host = os.environ.get('db_host', "127.0.0.1")
 db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
 PADDING = 50
+update_lock = Lock()
 summary_lock = Lock()
 result_lock = Lock()
 ALLOWED_DEFECTS = {"D", "V", "S"}
@@ -314,7 +315,7 @@ def draw_boxes(img, defect_boxes):
 
     return img
 
-def add_summary(img, counts, severity):
+def add_summary(img, counts, severity, distance):
 
     total = sum(counts.values())
 
@@ -336,7 +337,7 @@ def add_summary(img, counts, severity):
 
     cv2.putText(
         img,
-        f"SEVERITY : {severity}",
+        f"Length : {distance} mm",
         (20, 40),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
@@ -346,7 +347,7 @@ def add_summary(img, counts, severity):
 
     cv2.putText(
         img,
-        f"TOTAL DEFECTS : {total}",
+        f"SEVERITY : {severity}",
         (20, 80),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
@@ -356,8 +357,18 @@ def add_summary(img, counts, severity):
 
     cv2.putText(
         img,
-        f"SUMMARY : {summary_text}",
+        f"TOTAL DEFECTS : {total}",
         (20, 120),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        img,
+        f"SUMMARY : {summary_text}",
+        (20, 160),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.8,
         (255, 255, 255),
@@ -369,6 +380,7 @@ def add_summary(img, counts, severity):
 def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results):
     defect_json, counts = {}, {}
     date_str = datetime.now().strftime('%Y%m%d')
+    last_update = datetime.now()
 
     for rank, image_name in image_items:
         print("Ranking:", rank, " - Processing:", image_name)
@@ -390,7 +402,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                 severity = calculate_severity(total)
 
                 annotated = draw_boxes(img.copy(), boxes)
-                annotated = add_summary(annotated, counts, severity)
+                annotated = add_summary(annotated, counts, severity, distance)
 
                 # ---- FILE NAMING ---- #
                 if total > 0:
@@ -423,7 +435,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
 
                 save_dir = os.path.join(RESULT_PATH, date_str, cycle_uid, folder)
                 os.makedirs(save_dir, exist_ok=True)
-                save_path = os.path.join(save_dir, f"{new_name}.jpg")
+                save_path = os.path.join(save_dir, new_name)
                 cv2.imwrite(save_path, annotated)
                 cv2.imwrite(f"{TEMP_PATH}/{LOCATION}/{cam_serial}_debug.jpg", annotated)
 
@@ -449,7 +461,10 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
 
                 # update live.json with final summary and results
                 try:
-                    update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="inprogress")
+                    with update_lock:
+                        if (datetime.now()-last_update).total_seconds() > 10:
+                            update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="inprogress")
+                            last_update = datetime.now()
                 except Exception:
                     pass
 
