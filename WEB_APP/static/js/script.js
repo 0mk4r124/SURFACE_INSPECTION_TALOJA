@@ -193,20 +193,20 @@ class CoilMap {
     prepareData() {
         this.defects = [];
         (this.rawData || []).forEach(frame => {
-            ["V", "D", "S", "C"].forEach(type => {
+                ["V", "D", "S", "C"].forEach(type => {
                 if (frame[type]) {
-                    frame[type].forEach(defect => {
-                        this.defects.push({
-                            type,
-                            frame: frame.r,
+                        frame[type].forEach(defect => {
+                            this.defects.push({
+                                type,
+                                frame: frame.r,
                             length: parseInt(frame.l || 0),
-                            widthPos: defect.pos_mm || 0,
-                            confidence: defect.c || 0,
-                            img: frame.img || null
+                                widthPos: defect.pos_mm || 0,
+                                confidence: defect.c || 0,
+                                img: frame.img || null
+                            });
                         });
-                    });
-                }
-            });
+                    }
+                });
         });
         if (this.defects.length === 0) {
             this.minLen = 0;
@@ -246,7 +246,7 @@ class CoilMap {
             if (p.x < -10 || p.x > this.canvas.width + 10) continue;
             this.visiblePoints.push({ ...defect, ...p });
             ctx.beginPath();
-            ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
             ctx.fillStyle = this.getColor(defect.type);
             ctx.fill();
         }
@@ -573,9 +573,17 @@ function showRunDetails(data, meta) {
     document.getElementById("rdDatetime").innerText = meta.datetime  || "-";
 
     // Coil length header
-    const totalKm = (Number(data.coil_length_mm) || 0) / 1000000;
+    let rdTotalKm = (Number(data.coil_length_mm) || 0) / 1000000;
+    if (rdTotalKm === 0 && Array.isArray(data.result) && data.result.length > 0) {
+        let maxL = 0;
+        data.result.forEach(frame => {
+            const l = parseInt(frame.l) || 0;
+            if (l > maxL) maxL = l;
+        });
+        rdTotalKm = maxL / 1000000;
+    }
     const rdLenEl = document.getElementById("rdCoilLen");
-    if (rdLenEl) rdLenEl.innerText = `${totalKm.toFixed(1)} km total`;
+    if (rdLenEl) rdLenEl.innerText = `${rdTotalKm.toFixed(1)} km total`;
 
     // Stats tiles
     document.getElementById("rdStatFrames").innerText   = data.total_frames            || 0;
@@ -585,9 +593,20 @@ function showRunDetails(data, meta) {
     // Per-type counts from frame.t summaries
     const tc = { V: 0, D: 0, S: 0, C: 0 };
     (data.result || []).forEach(frame => {
-        Object.entries(frame.t || {}).forEach(([k, v]) => {
-            if (tc[k] !== undefined) tc[k] += v;
-        });
+        // Format 1: frame.t = { V: 3, D: 1 }
+        if (frame.t && typeof frame.t === "object") {
+            Object.entries(frame.t).forEach(([k, v]) => {
+                if (tc[k] !== undefined) tc[k] += Number(v) || 0;
+            });
+        }
+        // Format 2: frame["V"] = [{pos_mm, c}, ...] ? same as live.json / prepareData() reads
+        else {
+            ["V", "D", "S", "C"].forEach(type => {
+                if (frame[type] && Array.isArray(frame[type])) {
+                    tc[type] += frame[type].length;
+                }
+            });
+        }
     });
     document.getElementById("rdStatV").innerText = tc.V;
     document.getElementById("rdStatD").innerText = tc.D;
@@ -595,7 +614,12 @@ function showRunDetails(data, meta) {
     document.getElementById("rdStatC").innerText = tc.C;
 
     // Reset filter button states
-    document.querySelectorAll(".rd-filter-btn").forEach(b => b.classList.add("active"));
+    document.querySelectorAll(".rd-filter-btn").forEach(b => {
+        b.classList.add("active");
+        b.style.background = b.dataset.origColor || b.style.background;
+        b.style.color      = '#fff';
+        b.style.boxShadow  = '';
+    });
     if (rdCoilMap) rdCoilMap.filters = { V: true, D: true, S: true, C: true };
 
     // Stage data for CoilMap ? applied after modal finishes showing
@@ -619,17 +643,45 @@ document.addEventListener("click", async (e) => {
     // View run details
     const viewBtn = e.target.closest(".view-run-details");
     if (viewBtn) {
-        const cycleUid  = viewBtn.dataset.cycle;
-        const coilId    = viewBtn.dataset.coil    || "";
-        const datetime  = viewBtn.dataset.datetime || "";
+        const cycleUid = viewBtn.dataset.cycle;
+        const coilId   = viewBtn.dataset.coil     || "";
+        const datetime = viewBtn.dataset.datetime  || "";
         try {
             const resp = await fetch(`/api/get_run_details/?cycle_uid=${cycleUid}`);
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
             const data = await resp.json();
-            showRunDetails(data, { coil_id: coilId, cycle_uid: cycleUid, datetime });
+
+            if (!resp.ok) {
+                // Populate header chips so user knows which cycle failed
+                document.getElementById("rdCoilId").innerText    = coilId   || "-";
+                document.getElementById("rdCycleUid").innerText  = cycleUid || "-";
+                document.getElementById("rdDatetime").innerText  = datetime  || "-";
+                document.getElementById("rdCoilLen").innerText   = "";
+                ["rdStatFrames","rdStatDefects","rdStatDefFrames",
+                 "rdStatV","rdStatD","rdStatS","rdStatC"]
+                    .forEach(id => { const el = document.getElementById(id); if(el) el.innerText = "-"; });
+                // Show error banner ? create once, reuse
+                let errBanner = document.getElementById("rdErrorBanner");
+                if (!errBanner) {
+                    errBanner = document.createElement("div");
+                    errBanner.id = "rdErrorBanner";
+                    errBanner.className = "alert alert-warning mb-3";
+                    errBanner.style.fontFamily = "monospace";
+                    const body = document.querySelector("#runDetailsModal .modal-body");
+                    if (body) body.prepend(errBanner);
+                }
+                errBanner.style.display = "block";
+                errBanner.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${data.error || "Data unavailable."}`;
+                rdPendingData = null;
+                new bootstrap.Modal(document.getElementById("runDetailsModal")).show();
+            } else {
+                // Hide stale error banner if present
+                const errBanner = document.getElementById("rdErrorBanner");
+                if (errBanner) errBanner.style.display = "none";
+                showRunDetails(data, { coil_id: coilId, cycle_uid: cycleUid, datetime });
+            }
         } catch (err) {
             console.error("Error fetching run details:", err);
-            alert("Failed to load run details.");
+            alert("Network error ? could not load run details.");
         }
         return;
     }
@@ -663,11 +715,21 @@ document.addEventListener("DOMContentLoaded", () => {
     coilMap = new CoilMap("coilMap", "mapTooltip");
     window.coilMap = coilMap; // for filter buttons (onclick)
     document.getElementById("siZoomReset")?.addEventListener("click", () => coilMap.resetZoom());
-    const filterBtns = document.querySelectorAll('.defect-filter-btn');
+    const filterBtns = document.querySelectorAll('.defect-filter-btn:not(.rd-filter-btn)');
     filterBtns.forEach(btn => {
+        btn.dataset.origColor = btn.style.background;  // save before any change
         btn.addEventListener('click', () => {
             const type = btn.dataset.type;
             btn.classList.toggle('active');
+            if (btn.classList.contains('active')) {
+                btn.style.background = btn.dataset.origColor;
+                btn.style.color      = '#fff';
+                btn.style.boxShadow  = '';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color      = btn.dataset.origColor;
+                btn.style.boxShadow  = 'inset 0 0 0 2px ' + btn.dataset.origColor;
+            }
             if (coilMap) coilMap.toggleFilter(type);
         });
     });
@@ -704,8 +766,18 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!rdCoilMap) {
             rdCoilMap = new CoilMap("rdCoilMap", "rdMapTooltip", "rdCoilStart", "rdCoilEnd");
             document.querySelectorAll(".rd-filter-btn").forEach(btn => {
+                btn.dataset.origColor = btn.style.background;  // save before any change
                 btn.addEventListener("click", () => {
                     btn.classList.toggle("active");
+                    if (btn.classList.contains('active')) {
+                        btn.style.background = btn.dataset.origColor;
+                        btn.style.color      = '#fff';
+                        btn.style.boxShadow  = '';
+                    } else {
+                        btn.style.background = 'transparent';
+                        btn.style.color      = btn.dataset.origColor;
+                        btn.style.boxShadow  = 'inset 0 0 0 2px ' + btn.dataset.origColor;
+                    }
                     if (rdCoilMap) rdCoilMap.toggleFilter(btn.dataset.type);
                 });
             });

@@ -136,131 +136,87 @@ def live_ip_camera(request):
 @csrf_exempt
 def fetch_history_data(request):
 
-    page = int(request.GET.get("page", 1))
-    per_page = int(request.GET.get("per_page", 10))
+    page     = int(request.GET.get("page", 1))
+    per_page = int(request.GET.get("per_page", 15))
 
     start_date = request.GET.get("start_date")
-    end_date = request.GET.get("end_date")
-    coil_id = request.GET.get("coil_id")
+    end_date   = request.GET.get("end_date")
+    coil_id    = request.GET.get("coil_id")
 
     try:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        end_dt   = datetime.strptime(end_date,   "%Y-%m-%d")
     except Exception:
-        return JsonResponse(
-            {"error": "Invalid date range"},
-            status=400
-        )
+        return JsonResponse({"error": "Invalid date range"}, status=400)
 
-    queryset = MILL_RUNS.objects.filter(
-        created_at__date__gte=start_dt,
-        created_at__date__lte=end_dt
-    ).order_by("-created_at")
+    # Primary source: DEFECTS_HISTORY by create_time
+    # One row per cycle_uid (LOGIC.py upserts), contains defect_details JSON
+    queryset = DEFECTS_HISTORY.objects.filter(
+        create_time__date__gte=start_dt,
+        create_time__date__lte=end_dt
+    ).order_by("-create_time")
 
     if coil_id:
-        queryset = queryset.filter(
-            coil_id__icontains=coil_id
-        )
+        queryset = queryset.filter(coil_id__icontains=coil_id)
 
-    total = queryset.count()
-
-    start = (page - 1) * per_page
-    end = start + per_page
-
-    queryset = queryset[start:end]
+    total   = queryset.count()
+    start   = (page - 1) * per_page
+    end_idx = start + per_page
+    page_qs = queryset[start:end_idx]
 
     results = []
 
-    for idx, run in enumerate(queryset, start=start+1):
+    for idx, row in enumerate(page_qs, start=start + 1):
 
-        defects = DEFECTS_HISTORY.objects.filter(
-            cycle_uid=run.cycle_uid
-        )
-
-        total_frames = defects.count()
-
-        total_defects = 0
+        total_frames        = 0
+        total_defects       = 0
         total_defect_frames = 0
+        defect_summary      = {}
 
-        defect_summary = {}
-
-        for row in defects:
-
+        if row.defect_details:
             try:
-
-                if not row.defect_details:
-                    continue
-
+                # defect_details written by LOGIC.py as json.dumps(defect_summary)
+                # keys: total_frames, total_defects, total_defective_frames,
+                #       defect_frames, V, D, S, C, ...
                 summary = json.loads(row.defect_details)
 
-                frame_has_defect = False
+                total_frames = int(summary.get("total_frames", 0) or 0)
+                total_defects = int(summary.get("total_defects", 0) or 0)
+                total_defect_frames = int(
+                    summary.get(
+                        "total_defective_frames",
+                        summary.get("defect_frames", 0)
+                    ) or 0
+                )
 
-                for defect_name, count in summary.items():
+                for key in ["V", "D", "S", "C"]:
+                    val = int(summary.get(key, 0) or 0)
+                    if val > 0:
+                        defect_summary[key] = val
 
-                    total_defects += count
-
-                    defect_summary[defect_name] = (
-                        defect_summary.get(defect_name, 0)
-                        + count
-                    )
-
-                    if count > 0:
-                        frame_has_defect = True
-
-                if frame_has_defect:
-                    total_defect_frames += 1
-
-            except:
+            except Exception:
                 pass
 
         summary_text = ", ".join(
-            [
-                f"{k}:{v}"
-                for k, v in defect_summary.items()
-            ]
+            [f"{k}:{v}" for k, v in defect_summary.items()]
         )
 
         results.append({
-
-            "sno": idx,
-
-            "datetime":
-                run.created_at.strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-
-            "coil_id":
-                run.coil_id,
-
-            "cycle_uid":
-                run.cycle_uid,
-
-            "total_defects":
-                total_defects,
-
-            "total_frames":
-                total_frames,
-
-            "total_defect_frames":
-                total_defect_frames,
-
-            "defect_summary":
-                summary_text[:60] +
-                ("..." if len(summary_text) > 60 else ""),
-
-            "json_path":
-                getattr(run, "json_path", None)
+            "sno":               idx,
+            "datetime":          row.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "coil_id":           row.coil_id,
+            "cycle_uid":         row.cycle_uid,
+            "total_defects":     total_defects,
+            "total_frames":      total_frames,
+            "total_defect_frames": total_defect_frames,
+            "defect_summary":    summary_text[:60] + ("..." if len(summary_text) > 60 else ""),
         })
 
     return JsonResponse({
-
-        "data": results,
-
-        "total": total,
-
-        "page": page,
-
-        "per_page": per_page
+        "data":     results,
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
     })
     
 @csrf_exempt
@@ -271,173 +227,129 @@ def get_run_details(request):
     if not cycle_uid:
         return JsonResponse({"error": "cycle_uid required"}, status=400)
 
-    # --- Try reading the cycle JSON file first ---
     defect_row = DEFECTS_HISTORY.objects.filter(cycle_uid=cycle_uid).first()
 
-    if defect_row and defect_row.json_path and os.path.exists(defect_row.json_path):
-        try:
-            with open(defect_row.json_path, "r") as fp:
-                data = json.load(fp)
-            return JsonResponse(data)
-        except Exception:
-            pass  # fall through to DB construction below
+    if not defect_row:
+        return JsonResponse({"error": "No DB record found for this cycle."}, status=404)
 
-    # --- Fallback: build response from DB rows ---
-    run = MILL_RUNS.objects.filter(cycle_uid=cycle_uid).first()
-    defect_rows = DEFECTS_HISTORY.objects.filter(cycle_uid=cycle_uid)
+    json_path = defect_row.json_path or ""
 
-    if not run and not defect_rows.exists():
-        return JsonResponse({"error": "data not found"}, status=404)
+    if not json_path or not os.path.exists(json_path):
+        return JsonResponse({
+            "error": f"JSON file not available at: {json_path or '(no path recorded)'}"
+        }, status=404)
 
-    result = []
-    total_defects = 0
-    total_defective_frames = 0
+    try:
+        with open(json_path, "r") as fp:
+            data = json.load(fp)
+    except Exception as e:
+        return JsonResponse({"error": f"Failed to read JSON: {str(e)}"}, status=500)
 
-    for row in defect_rows:
-        try:
-            summary = json.loads(row.defect_details) if row.defect_details else {}
-        except Exception:
-            summary = {}
+    # --- Inject top-level stats if absent (cycle JSON only has cycle_uid/coil_id/result) ---
+    result_list = data.get("result", [])
 
-        frame_defect_count = sum(summary.values())
-        total_defects += frame_defect_count
-        if frame_defect_count > 0:
-            total_defective_frames += 1
+    if "total_frames" not in data:
+        data["total_frames"] = len(result_list)
 
-        result.append({
-            "r": row.id,
-            "l": 0,          # length position not stored per-frame in DB
-            "t": summary,
-            "s": None,
-            "img": None,
-        })
+    if "total_defects" not in data:
+        td = 0
+        for frame in result_list:
+            for v in (frame.get("t") or {}).values():
+                try:
+                    td += int(v)
+                except Exception:
+                    pass
+        data["total_defects"] = td
 
-    data = {
-        "cycle_uid":              cycle_uid,
-        "coil_id":                run.coil_id if run else (defect_rows.first().coil_id if defect_rows.exists() else ""),
-        "coil_length_mm":         0,
-        "current_position_mm":    0,
-        "total_frames":           defect_rows.count(),
-        "total_defects":          total_defects,
-        "total_defective_frames": total_defective_frames,
-        "status":                 run.status if run else "COMPLETE",
-        "result":                 result,
-    }
+    if "total_defective_frames" not in data:
+        tdf = 0
+        for frame in result_list:
+            t = frame.get("t") or {}
+            if any(int(v) > 0 for v in t.values() if str(v).isdigit() or isinstance(v, (int, float))):
+                tdf += 1
+        data["total_defective_frames"] = tdf
+
+    # coil_length_mm absent ? client computes from max l value
+    data.setdefault("coil_length_mm", 0)
 
     return JsonResponse(data)
         
 @csrf_exempt
 def download_history_data(request):
-
     start_date = request.GET.get("start_date")
-    end_date = request.GET.get("end_date")
+    end_date   = request.GET.get("end_date")
+    coil_id    = request.GET.get("coil_id")
 
     try:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt   = datetime.strptime(end_date, "%Y-%m-%d")
+    except Exception:
+        return HttpResponse("Invalid date range", status=400)
 
-        start_dt = datetime.strptime(
-            start_date,
-            "%Y-%m-%d"
-        )
+    # Same source as fetch_history_data
+    queryset = DEFECTS_HISTORY.objects.filter(
+        create_time__date__gte=start_dt,
+        create_time__date__lte=end_dt
+    ).order_by("-create_time")
 
-        end_dt = datetime.strptime(
-            end_date,
-            "%Y-%m-%d"
-        )
+    if coil_id:
+        queryset = queryset.filter(coil_id__icontains=coil_id)
 
-    except:
-
-        return HttpResponse(
-            "Invalid Date Range",
-            status=400
-        )
-
-    queryset = MILL_RUNS.objects.filter(
-        created_at__date__gte=start_dt,
-        created_at__date__lte=end_dt
-    ).order_by("-created_at")
-
-    response = HttpResponse(
-        content_type="text/csv"
-    )
-
-    response[
-        "Content-Disposition"
-    ] = 'attachment; filename="mill_history.csv"'
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="defects_history.csv"'
 
     writer = csv.writer(response)
 
+    # Same columns as old download_history_data
     writer.writerow([
-
         "DATETIME",
         "COIL_ID",
         "CYCLE_UID",
         "TOTAL_FRAMES",
         "TOTAL_DEFECT_FRAMES",
         "TOTAL_DEFECTS",
-        "DEFECT_SUMMARY"
-
+        "V",
+        "D",
+        "S",
+        "C"
     ])
 
-    for run in queryset:
-
-        defects = DEFECTS_HISTORY.objects.filter(
-            cycle_uid=run.cycle_uid
-        )
-
-        total_frames = defects.count()
-
-        total_defect_frames = 0
-
+    for row in queryset:
+        total_frames = 0
         total_defects = 0
+        total_defect_frames = 0
+        counts = {"V": 0, "D": 0, "S": 0, "C": 0}
 
-        summary = {}
-
-        for row in defects:
-
+        if row.defect_details:
             try:
+                summary = json.loads(row.defect_details)
 
-                defect_data = json.loads(
-                    row.defect_details
+                total_frames = int(summary.get("total_frames", 0) or 0)
+                total_defects = int(summary.get("total_defects", 0) or 0)
+                total_defect_frames = int(
+                    summary.get(
+                        "total_defective_frames",
+                        summary.get("defect_frames", 0)
+                    ) or 0
                 )
 
-                frame_has_defect = False
+                for key in ["V", "D", "S", "C"]:
+                    counts[key] = int(summary.get(key, 0) or 0)
 
-                for defect_name, count in defect_data.items():
-
-                    summary[defect_name] = (
-                        summary.get(defect_name, 0)
-                        + count
-                    )
-
-                    total_defects += count
-
-                    if count > 0:
-                        frame_has_defect = True
-
-                if frame_has_defect:
-                    total_defect_frames += 1
-
-            except:
+            except Exception:
                 pass
 
         writer.writerow([
-
-            run.created_at.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-
-            run.coil_id,
-
-            run.cycle_uid,
-
+            row.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+            row.coil_id,
+            row.cycle_uid,
             total_frames,
-
             total_defect_frames,
-
             total_defects,
-
-            json.dumps(summary)
-
+            counts["V"],
+            counts["D"],
+            counts["S"],
+            counts["C"]
         ])
 
     return response

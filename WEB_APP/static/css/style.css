@@ -775,3 +775,73 @@ body {
     color: inherit;
     border: 2px solid currentColor;
 }
+
+#runDetailsModal .rd-modal-content {
+    background: #ffffff;
+    color: #16323b;
+    border: 1px solid #e0e6ef;
+    box-shadow: 0 8px 32px rgba(20,30,50,0.18);
+}
+
+#runDetailsModal .rd-modal-header {
+    background: #f8fafb;
+    border-bottom: 1px solid #e0e6ef;
+    padding: 12px 20px;
+}
+
+#runDetailsModal .rd-modal-title {
+    color: #00c9a7;
+    font-family: 'Courier New', monospace;
+    font-size: 1rem;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+}
+
+#runDetailsModal .rd-modal-meta {
+    font-size: 20px;
+    color: #485060;
+    font-family: 'Courier New', monospace;
+}
+
+#runDetailsModal .rd-meta-value {
+    font-size: 20px;
+    font-weight: bold;
+    color: #d97706;
+}
+
+#runDetailsModal .rd-modal-body {
+    background: #f4f7fa;
+}
+
+#runDetailsModal .rd-modal-footer {
+    background: #f8fafb;
+    border-top: 1px solid #e0e6ef;
+}
+
+/* Tooltip inside rd modal */
+#rdMapTooltip {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    background: rgba(15, 23, 42, 0.92);
+    color: #e2e8f0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: monospace;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    border-left: 4px solid #00c9a7;
+}
+
+/* X-axis labels for rd modal */
+#rdCoilXAxis {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 2px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #485060;
+    font-family: 'Courier New', monospace;
+}

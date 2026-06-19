@@ -104,7 +104,7 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, json_path):
             insert_query = """
                 INSERT INTO DEFECTS_HISTORY
                 (CYCLE_UID, COIL_ID, DEFECT_DETAILS, JSON_PATH, CREATE_TIME)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
@@ -190,7 +190,7 @@ def process_labels(labels, img_shape):
 
         if cls not in ALLOWED_DEFECTS:
             continue
-        if score<0.95:
+        if score<0.60:
             continue
 
         # padding
@@ -215,27 +215,7 @@ def process_labels(labels, img_shape):
 def draw_boxes(img, defect_boxes):
 
     h, w = img.shape[:2]
-
     center_x = w // 2
-
-    # Draw center reference line
-    cv2.line(
-        img,
-        (center_x, 0),
-        (center_x, h),
-        (255, 255, 255),
-        2
-    )
-
-    cv2.putText(
-        img,
-        "CENTER",
-        (center_x + 5, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 255),
-        2
-    )
 
     for cls, items in defect_boxes.items():
 
@@ -256,15 +236,16 @@ def draw_boxes(img, defect_boxes):
 
             box_center_x = (x1 + x2) / 2
 
-            distance_mm = (
-                (box_center_x - center_x)
-                / float(w)
-            ) * 300
+            distance_mm = abs(
+                ((box_center_x - center_x) / float(w)) * 300
+            )
+
+            side_prefix = "OS" if box_center_x < center_x else "DS"
 
             label = (
-                f"{defect_name} "
+                f"{side_prefix}-{defect_name} "
                 f"({conf:.0f}%) "
-                f"{distance_mm:+.1f}mm"
+                f"{distance_mm:.1f}mm"
             )
 
             # Draw defect box
@@ -304,34 +285,16 @@ def draw_boxes(img, defect_boxes):
                 2
             )
 
-            # Draw line from box center to frame center
-            cv2.line(
-                img,
-                (int(box_center_x), (y1 + y2)//2),
-                (center_x, (y1 + y2)//2),
-                color,
-                1
-            )
-
     return img
 
 def add_summary(img, counts, severity, distance):
 
     total = sum(counts.values())
-
     summary = []
 
-    if counts.get("V", 0):
-        summary.append(f"V:{counts['V']}")
-
-    if counts.get("D", 0):
-        summary.append(f"D:{counts['D']}")
-
-    if counts.get("S", 0):
-        summary.append(f"S:{counts['S']}")
-
-    if counts.get("C", 0):
-        summary.append(f"C:{counts['C']}")
+    for key in counts:
+        if counts[key]:
+            summary.append(f"{key}:{counts[key]}")
 
     summary_text = " | ".join(summary)
 
@@ -650,7 +613,7 @@ def main():
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
         os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
         "model_final.pth",
-        0.90,
+        0.60,
         os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
         False,
         GPU_ID=0
@@ -661,7 +624,7 @@ def main():
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
         os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
         "model_final.pth",
-        0.90,
+        0.60,
         os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
         False,
         GPU_ID=0
@@ -680,8 +643,8 @@ def main():
             continue
 
         for cycle_uid in os.listdir(base):
-            while True:
-                if len(os.listdir(os.path.join(base, cycle_uid))) > 0: 
+            for cam_serial in os.listdir(os.path.join(base, cycle_uid)):
+                if len(os.listdir(os.path.join(base, cycle_uid, cam_serial))) > 5000: 
                     process_cycle(cycle_uid, model_1, model_2, mq_obj)
                 else: break
 
