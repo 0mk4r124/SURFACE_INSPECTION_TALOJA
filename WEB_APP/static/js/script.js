@@ -149,16 +149,109 @@ function openImageModal(imgUrl, title) {
 }
 
 // Helper for defect clicks
+// Helper for defect clicks
 function openDefectImage(point) {
-    const srcPath = point.image || point.img || point.image_url || "";
-    if (!srcPath) {
+    const rawPath = point.rawImg || "";
+    const fallback = point.img || point.image || point.image_url || "";
+    const frameNum = point.frame || point.r || "";
+
+    const title = frameNum
+        ? `Frame ${frameNum} | ${point.length || ""} mm`
+        : (DEFECT_NAMES[point.type] || point.type || "Defect");
+
+    console.log("openDefectImage called with:", { point, rawPath, fallback, title });
+
+    if (rawPath && point.box) {
+        const rawUrl = "/api/serve-file?file=" + encodeURIComponent(rawPath);
+        const tmpImg = new Image();
+        tmpImg.crossOrigin = "anonymous";
+
+        tmpImg.onload = function () {
+            const canvas = document.createElement("canvas");
+            canvas.width = tmpImg.naturalWidth;
+            canvas.height = tmpImg.naturalHeight;
+
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(tmpImg, 0, 0);
+
+            const imgW = tmpImg.naturalWidth;
+            const centerX = imgW / 2;
+            const mmPerPixel = 300 / imgW;
+
+            // box format: [x1, x2, y1, y2]
+            const [bx1, bx2, by1, by2] = point.box;
+
+            const defectCenterX = (bx1 + bx2) / 2;
+            const offsetPx = defectCenterX - centerX;
+            const offsetMm = Math.abs(offsetPx * mmPerPixel).toFixed(1);
+
+            const side = offsetPx < 0 ? "OS" : "DS";
+
+            const defectName = (DEFECT_NAMES[point.type] || point.type || "DEFECT").toUpperCase();
+            const label = `${side} ${defectName} ${offsetMm}mm`;
+
+            const color = defectColors[point.type] || "#ffffff";
+
+            // Draw bounding box
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(
+                bx1,
+                by1,
+                bx2 - bx1,
+                by2 - by1
+            );
+
+            // Draw label box
+            ctx.font = "bold 18px monospace";
+            const textWidth = ctx.measureText(label).width;
+            const textHeight = 26;
+
+            let labelX = bx1;
+            let labelY = by1 - 8;
+
+            // Prevent overflow at top
+            if (labelY < textHeight) {
+                labelY = by1 + textHeight;
+            }
+
+            ctx.fillStyle = color;
+            ctx.fillRect(
+                labelX,
+                labelY - textHeight,
+                textWidth + 12,
+                textHeight
+            );
+
+            // Draw label text
+            ctx.fillStyle = "#000000";
+            ctx.fillText(label, labelX + 6, labelY - 6);
+
+            openImageModal(canvas.toDataURL("image/jpeg", 0.92), title);
+        };
+
+        tmpImg.onerror = function () {
+            if (!fallback) return;
+            openImageModal(
+                "/api/serve-file?file=" + encodeURIComponent(fallback),
+                title
+            );
+        };
+
+        tmpImg.src = rawUrl;
+        return;
+    }
+
+    // fallback
+    if (!fallback) {
         console.warn("No image path for point", point);
         return;
     }
-    const imgUrl = "/api/serve-file?file=" + encodeURIComponent(srcPath);
-    const frameNum = point.frame || point.r || "";
-    const title = frameNum ? `Frame ${frameNum} | ${point.length || ""} mm` : (point.defect || "Defect");
-    openImageModal(imgUrl, title);
+
+    openImageModal(
+        "/api/serve-file?file=" + encodeURIComponent(fallback),
+        title
+    );
 }
 
 // ======================== DASHBOARD: CoilMap (optimised) ========================
@@ -175,7 +268,7 @@ class CoilMap {
         this.dragging = false;
         this.dragStartX = 0;
         this.hasMoved = false;
-        this.filters = { V: true, D: true, S: true, C: true };
+        this.filters = { W: true,  O: true,  D: true, S: true, C: true };
         this.visiblePoints = [];
         this.startLabelId = startLabelId;
         this.endLabelId = endLabelId;
@@ -209,7 +302,9 @@ class CoilMap {
                             length: parseInt(frame.l || 0),
                                 widthPos: defect.pos_mm || 0,
                                 confidence: defect.c || 0,
-                                img: frame.img || null
+                                img: frame.img || null,
+                                rawImg: frame.raw_img || null,
+                                box: defect.b || null,
                             });
                         });
                     }
@@ -628,7 +723,7 @@ function showRunDetails(data, meta) {
         b.style.color      = '#fff';
         b.style.boxShadow  = '';
     });
-    if (rdCoilMap) rdCoilMap.filters = { V: true, D: true, S: true, C: true };
+    if (rdCoilMap) rdCoilMap.filters = { W: true,  O: true,  D: true, S: true, C: true };
 
     // Stage data for CoilMap ? applied after modal finishes showing
     rdPendingData = data;

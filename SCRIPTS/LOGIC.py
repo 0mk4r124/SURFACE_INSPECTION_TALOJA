@@ -403,10 +403,17 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                         defect_summary["distance"] = distance
                         mq_obj.publish("ui/logic", defect_summary)
 
+                # RESULT
                 save_dir = os.path.join(RESULT_PATH, date_str, cycle_uid, folder)
                 os.makedirs(save_dir, exist_ok=True)
                 save_path = os.path.join(save_dir, new_name)
                 cv2.imwrite(save_path, annotated)
+                # TRASH
+                save_dir = os.path.join(TRASH_PATH, cycle_uid, cam_serial)
+                os.makedirs(save_dir, exist_ok=True)
+                save_path = os.path.join(save_dir, image_name)
+                cv2.imwrite(save_path, img)
+                # TEMP
                 cv2.imwrite(f"{TEMP_PATH}/{LOCATION}/{cam_serial}_debug.jpg", annotated)
 
                 defect_json = {
@@ -418,6 +425,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                     **boxes,
                     "t": counts,
                     "img": save_path,
+                    "raw_img": os.path.join(TRASH_PATH, cycle_uid, cam_serial, image_name),
                 }
 
                 # increment total frames processed
@@ -542,13 +550,15 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
         "total_defects": 0,
         "defect_frames": 0,
         "total_defective_frames": 0,
-        "D": 0, "V": 0, "S":0,
+        "D": 0, "W": 0, "S":0,
+        "O": 0, "C": 0,
     }
 
     # ---- MOVE TO TRASH ---- #
-    trash_dest = os.path.join(TRASH_PATH, cycle_uid)
-    if os.path.exists(trash_dest): shutil.rmtree(trash_dest)
-    shutil.move(base_path, trash_dest)
+    # trash_dest = os.path.join(TRASH_PATH, cycle_uid)
+    # if os.path.exists(trash_dest): shutil.rmtree(trash_dest)
+    # shutil.move(base_path, trash_dest)
+    shutil.rmtree(base_path)
 
 def is_folder_stable(folder):
     size1 = get_size(folder)
