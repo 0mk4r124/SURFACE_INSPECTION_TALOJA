@@ -10,9 +10,10 @@ let modalOpen = false;
 let rdCoilMap = null;
 let rdPendingData = null; 
 const DEFECT_NAMES = {
-    'V': 'Vibration',
+    'O': 'Oil Stain',
+    'W': 'White Spot',
     'D': 'Dent',
-    'S': 'Sliver',
+    'S': 'Scoring',
     'C': 'Scratch'
 };
 
@@ -22,7 +23,13 @@ const zoomWrapper = document.getElementById("zoomWrapper");
 const imageLoader = document.getElementById("imageLoader");
 
 // Defect colour mapping
-const defectColors = { V: "#007bff", D: "#dc3545", S: "#28a745", C: "#fd7e14" };
+const defectColors = {
+    O: "#0000ff", // OIL_STAIN (BGR: 255,0,0 -> RGB: 0,0,255) Blue
+    W: "#808080", // WHITE_SPOT (128,128,128) Gray
+    S: "#ffff00", // SCORING (0,255,255) Yellow
+    D: "#ff0000", // DENT (0,0,255) Red
+    C: "#00ff00"  // SCRATCH (0,255,0) Green
+};
 
 // ======================== CSRF TOKEN ========================
 function getCookie(name) {
@@ -193,7 +200,7 @@ class CoilMap {
     prepareData() {
         this.defects = [];
         (this.rawData || []).forEach(frame => {
-                ["V", "D", "S", "C"].forEach(type => {
+                ["O", "W", "D", "S", "C"].forEach(type => {
                 if (frame[type]) {
                         frame[type].forEach(defect => {
                             this.defects.push({
@@ -222,7 +229,7 @@ class CoilMap {
     }
 
     getColor(type) {
-        return { V: "#007bff", D: "#dc3545", S: "#28a745", C: "#f39c12" }[type] || "#aaa";
+        return defectColors[type] || "#aaa";
     }
 
     mapPoint(defect) {
@@ -373,11 +380,12 @@ function updateSIDashboard(data) {
     document.getElementById("siStatDefFrames").innerText = data.total_defective_frames || 0;
 
     // Defect breakdown
-    const typeCounts = { V: 0, D: 0, S: 0, C: 0 };
+    const typeCounts = { O: 0,  W: 0, D: 0, S: 0, C: 0 };
     (data.result || []).forEach(frame => {
         Object.entries(frame.t || {}).forEach(([k, v]) => { if (typeCounts[k] !== undefined) typeCounts[k] += v; });
     });
-    document.getElementById("siStatV").innerText = typeCounts.V;
+    document.getElementById("siStatO").innerText = typeCounts.O;
+    document.getElementById("siStatW").innerText = typeCounts.W;
     document.getElementById("siStatD").innerText = typeCounts.D;
     document.getElementById("siStatS").innerText = typeCounts.S;
     document.getElementById("siStatC").innerText = typeCounts.C;

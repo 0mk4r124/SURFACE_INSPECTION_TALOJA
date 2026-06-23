@@ -38,12 +38,13 @@ PADDING = 50
 update_lock = Lock()
 summary_lock = Lock()
 result_lock = Lock()
-ALLOWED_DEFECTS = {"D", "V", "S"}
+ALLOWED_DEFECTS = {"O", "W", "S", "D", "C"}
 DEFECT_CONFIG = {
-    "V": {"name": "VIBRATION", "color": (255, 0, 0)},      # Blue
-    "D": {"name": "DENT",      "color": (0, 0, 255)},      # Red
-    "S": {"name": "SLIVER",    "color": (0, 255, 0)},      # Green
-    "C": {"name": "SCRATCH",   "color": (0, 255, 255)},    # Yellow
+    "O": {"name": "OIL_STAIN", "color": (255, 0, 0)},      # Blue
+    "W": {"name": "WHITE_SPOT",      "color": (128, 128, 128)},      # Gray
+    "S": {"name": "SCORING",    "color": (0, 255, 255)},      # Yellow
+    "D": {"name": "DENT",   "color": (0, 0, 255)},    # Red
+    "C": {"name": "SCRATCH",   "color": (0, 255, 0)},    # Green
 }
 
 logger = initializeLogger("LOGIC", LOGS_PATH=LOGS_PATH)
@@ -179,12 +180,16 @@ def process_labels(labels, img_shape):
             continue
 
         # normalize + filter
-        if "SILVER" in raw_cls:
+        if "OIL_STAIN" in raw_cls:
+            cls = "O"
+        elif "WHITE_SPOT" in raw_cls:
+            cls = "W"
+        elif "SCORING" in raw_cls:
             cls = "S"
         elif "DENT" in raw_cls:
             cls = "D"
-        elif "VIBRATION" in raw_cls:
-            cls = "V"
+        elif "SCRATCH" in raw_cls:
+            cls = "C"
         else:
             continue
 
@@ -377,10 +382,12 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                         defect_summary["processed_at"] = datetime.now().isoformat()
                         defect_summary["last_severity"] = severity
                         defect_summary["distance"] = distance
+                        defect_summary["O"] += counts.get("S", 0)
+                        defect_summary["W"] += counts.get("D", 0)
                         defect_summary["S"] += counts.get("S", 0)
                         defect_summary["D"] += counts.get("D", 0)
-                        defect_summary["V"] += counts.get("V", 0)
-                        defect_summary["total_defects"] += counts.get("V", 0) + counts.get("S", 0) + counts.get("D", 0)
+                        defect_summary["C"] += counts.get("C", 0)
+                        defect_summary["total_defects"] += counts.get("O", 0) + counts.get("W", 0) + counts.get("S", 0) + counts.get("D", 0) + counts.get("C", 0)
                         # increment defect frame counters
                         defect_summary["defect_frames"] = defect_summary.get("defect_frames", 0) + 1
                         defect_summary["total_defective_frames"] = defect_summary.get("total_defective_frames", 0) + 1
@@ -462,7 +469,8 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
         "total_defects": 0,
         "defect_frames": 0,
         "total_defective_frames": 0,
-        "D": 0, "V": 0, "S":0,
+        "O": 0, "W": 0, "S":0,
+        "D": 0, "C": 0,
     }
 
     for cam_serial in os.listdir(base_path):
@@ -611,10 +619,10 @@ def main():
     model_1 = MASKRCNN(
         "taloja1",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_20JUNE"),
         "model_final.pth",
         0.60,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_20JUNE/TALOJA_MODEL_20JUNE.json"),
         False,
         GPU_ID=0
     )
@@ -622,10 +630,10 @@ def main():
     model_2 = MASKRCNN(
         "taloja2",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_20JUNE"),
         "model_final.pth",
         0.60,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_22MAY/TALOJA_MODEL_22MAY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_20JUNE/TALOJA_MODEL_20JUNE.json"),
         False,
         GPU_ID=0
     )
