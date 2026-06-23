@@ -18,7 +18,7 @@ from DEPENDANT.LOGGING import initializeLogger
 LOCATION = "TALOJA"
 
 # /home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA /home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA
-BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/')
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
 
 MODEL_DIR = os.path.join(BASE_FILE_PATH, "DEBUGS", "MODEL")
 RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
