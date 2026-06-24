@@ -435,8 +435,19 @@ def get_current_status(request):
             data.setdefault("result", [])
 
             return JsonResponse(data)
-    except Exception:
-        pass
+
+    except Exception as e:
+        return JsonResponse({
+            "error": str(e),
+            "coil_length_mm": 12000000,
+            "current_position_mm": 0,
+            "speed_mpm": 0,
+            "total_defects": 0,
+            "total_frames": 0,
+            "total_defective_frames": 0,
+            "status": "error",
+            "result": []
+        }, status=500)
 
     # Fallback sample data
     # sample = {
