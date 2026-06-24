@@ -113,6 +113,7 @@ def main():
                          eg_setpoint = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[2]") 
                          width = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[3]") 
                          length = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[4]")
+                         mq_obj.publish("taloja/health", {"service": "TRIGGER"})
                          mq_obj.publish("taloja/writer", {"diameter": diameter})
                          mq_obj.publish("taloja/capture", {"diameter": diameter, "mill_speed": mill_speed, "eg_setpoint": eg_setpoint, "width": width, "length": length}) 
 
@@ -140,6 +141,7 @@ def main():
                # logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                # logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
                print(f"diameter = {diameter} | mill_run = {mill_run} | ironing_raised = {ironing_raised}")
+               mq_obj.publish("taloja/health", {"service": "TRIGGER"})
                time.sleep(2)
 
           except Exception as e:

@@ -129,6 +129,8 @@ def process_capture(flir, mq_obj, logger):
         try:
 
             data = mq_obj.data
+            mq_obj.publish("taloja/health", {"service": "CAPTURE"})
+
             if data and data.get("_consumed") is not True:
                 action = data.get("action", "")
                 roll_num = data.get("roll_num", "")
@@ -144,6 +146,8 @@ def process_capture(flir, mq_obj, logger):
                         counter += 1
 
                         data = mq_obj.data
+                        mq_obj.publish("taloja/health", {"service": "TRIGGER"})
+
                         if data and data.get("_consumed") is not True:
                             action = data.get("action", "")
                             roll_num = data.get("roll_num", roll_num)

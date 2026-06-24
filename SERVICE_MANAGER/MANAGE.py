@@ -8,13 +8,15 @@ import time
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QTabWidget, QVBoxLayout, QPushButton,
-    QPlainTextEdit, QLabel, QHBoxLayout, QMainWindow, QFrame
+    QPlainTextEdit, QLabel, QHBoxLayout, QMainWindow, QFrame, QMessageBox
 )
 from PyQt5.QtCore import QProcess, QTimer, QProcessEnvironment
 from PyQt5.QtGui import QFont
 
 from tendo import singleton
 me = singleton.SingleInstance()
+
+from DEPENDANT import DISK_CLEANER
 
 # BASE_FILE_PATH = r"D:\INSIGHTZZ\PROJECTS\STANDARD_TEMPLATE\DJANGO_SCRIPTS_FRAMEWORK\SURFACE_INSPECTION_TALOJA\\"
 # SERVICES = {
@@ -349,9 +351,10 @@ class DashboardTab(QWidget):
     def __init__(self, service_tabs):
         super().__init__()
         self.service_tabs = service_tabs
+        self._disk_warned = False   # tracks whether the 85% popup has been shown
 
         layout = QVBoxLayout()
-        self.disk_label = QLabel("Disk: -- | Free: --")
+        self.disk_label = QLabel("Disk: -- | Free: -- | Used: --%")
         layout.addWidget(self.disk_label)
 
         # Divider line
@@ -379,9 +382,46 @@ class DashboardTab(QWidget):
         root_path = "/" if os.name != "nt" else "C:\\"
         try:
             usage = psutil.disk_usage(root_path)
+            pct   = usage.percent
+
+            # Colour the disk label based on usage level
+            if pct >= 95:
+                colour = "red"
+            elif pct >= 85:
+                colour = "orange"
+            else:
+                colour = "white"
+
             self.disk_label.setText(
-                f"Disk: {usage.total // (1024**3)} GB | Free: {usage.free // (1024**3)} GB"
+                f"Disk: {usage.total // (1024**3)} GB | "
+                f"Free: {usage.free // (1024**3)} GB | "
+                f"Used: {pct:.1f}%"
             )
+            self.disk_label.setStyleSheet(f"color: {colour}; font-weight: bold;")
+
+            # ── 85 % popup warning ────────────────────────────────────────────
+            if pct >= 85 and not self._disk_warned:
+                self._disk_warned = True
+                msg = QMessageBox(self)
+                msg.setWindowTitle("⚠ Disk Space Warning")
+                msg.setIcon(QMessageBox.Warning)
+                msg.setText(
+                    f"<b>Disk usage is at {pct:.1f}%</b><br><br>"
+                    "Storage is running low.<br>"
+                    "Auto-cleanup will trigger at <b>95%</b>.<br>"
+                    "Consider freeing space manually."
+                )
+                msg.setStyleSheet(
+                    "QMessageBox { background-color: #2b2b2b; color: white; }"
+                    "QLabel { color: white; }"
+                    "QPushButton { background-color: #444; color: white; padding: 4px 12px; }"
+                )
+                msg.exec_()
+
+            # Reset warn flag once disk drops back below 80 % so it can fire again
+            if pct < 80:
+                self._disk_warned = False
+
         except Exception as e:
             self.disk_label.setText(f"Disk: error ({e})")
 
@@ -416,6 +456,9 @@ class MainWindow(QMainWindow):
         self.tabs.insertTab(0, dashboard, "Dashboard")
 
         self.setCentralWidget(self.tabs)
+
+        # Start disk auto-cleaner daemon
+        DISK_CLEANER.start()
 
 
 if __name__ == "__main__":

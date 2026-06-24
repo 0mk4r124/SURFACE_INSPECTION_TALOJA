@@ -446,6 +446,8 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                 except Exception:
                     pass
 
+                mq_obj.publish("taloja/health", {"service": "WRITER"})
+
             except Exception as e:
                 print(f"Error processing {image_name}: {e}")
                 logger.error(f"{traceback.format_exc()}")
@@ -655,6 +657,7 @@ def main():
         base = os.path.join(RAW_PATH, LOCATION)
         mq_obj.publish("main/logic", {"roll_num": "--"})
         print("WAITING FOR DATA")
+        mq_obj.publish("taloja/health", {"service": "LOGIC"})
 
         if not os.path.exists(base):
             time.sleep(2)

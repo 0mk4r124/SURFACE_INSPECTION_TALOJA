@@ -108,6 +108,7 @@ def main():
     while True:
 
         try:
+            mq.publish("taloja/health", {"service": "WRITER"})
             data = mq.pop("taloja/writer")
 
             if not data:
