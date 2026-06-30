@@ -28,9 +28,13 @@ from DEPENDANT import DISK_CLEANER
 # PYTHON_EXE = r"C:\Users\ADMIN\miniconda3\envs\detectron2\python.exe"
 # CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"  # Adjust if different
 
+# if getattr(sys, "frozen", False):
+#     BASE_DIR = Path(sys.argv[0]).resolve().parent.parent.parent
+# else:
+#     BASE_DIR = Path(__file__).resolve().parent.parent
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 BASE_FILE_PATH = BASE_DIR
-
 db_user = "root"
 db_pass = "insightzz@123"
 db_host = "127.0.0.1"
@@ -40,10 +44,19 @@ SERVICES = {
     "Capture": f"{BASE_FILE_PATH}/SCRIPTS/CAPTURE.py",
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
+    "Health": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_MONITOR.py",
     "Logic": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC.py",
-    "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver",
-    # "Health Conn.": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_CHECKER.py",
+    "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver 0.0.0.0:8000",
 }
+
+# SERVICES = {
+#     "Capture": f"{BASE_FILE_PATH}/SCRIPTS/SCRIPTS/CAPTURE.py",
+#     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/SCRIPTS/TRIGGER.py",
+#     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/SCRIPTS/WRITER.py",
+#     "Health": f"{BASE_FILE_PATH}/SCRIPTS/SCRIPTS/HEALTH_MONITOR.py",
+#     "Logic": f"{BASE_FILE_PATH}/SCRIPTS/SCRIPTS/LOGIC.py",
+#     "Web App": f"{BASE_FILE_PATH}/WEB_APP/WEB_APP/manage.py runserver 0.0.0.0:8000",
+# }
 
 PYTHON_EXE = sys.executable
 CHROME_PATH = "/usr/bin/google-chrome"  # Adjust if different
@@ -166,6 +179,10 @@ class ServiceTab(QWidget):
         env.insert("db_pass", db_pass)
         env.insert("db_host", db_host)
         env.insert("db_name", db_name)
+        # env.insert(
+        #     "PYTHONPATH",
+        #     f"{BASE_FILE_PATH}/BIN/SCRIPTS"
+        # )
 
         self.process.setProcessEnvironment(env)
         # merge channels so stdout/stderr come together
@@ -183,6 +200,7 @@ class ServiceTab(QWidget):
 
         # Build args safely using shlex.split
         args = ["-u"] + shlex.split(self.command)
+        # args = shlex.split(self.command)
 
         # For Django, set working dir to project root
         if "Django" in self.name:
@@ -204,7 +222,9 @@ class ServiceTab(QWidget):
 
         # Start the process
         try:
+            # self.process.start("/usr/bin/python3", args)
             self.process.start(PYTHON_EXE, args)
+            # self.process.start(args[0], args[1:])
             # don't assume started immediately; wait is not blocking here
         except Exception as e:
             self.append_log(f"[EXCEPTION] start() failed: {e}")

@@ -95,7 +95,7 @@ def row_checker(row):
       - If last heartbeat was within INACTIVE_THRESHOLD → ACTIVE
       - Otherwise → INACTIVE
     """
-    row_id   = row["id"]
+    row_id   = row["ID"]
     svc_name = row_service_name(row)
 
     logger.info(f"Checker started → id={row_id} service={svc_name}")
@@ -175,7 +175,7 @@ def main():
             target=row_checker,
             args=(row,),
             daemon=True,
-            name=f"checker-{row['id']}-{row_service_name(row)}"
+            name=f"checker-{row['ID']}-{row_service_name(row)}"
         )
         t.start()
 

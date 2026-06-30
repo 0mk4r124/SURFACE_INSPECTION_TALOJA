@@ -3,10 +3,32 @@ import time
 import threading
 import traceback
 import psutil
+import logging
+
+from logging.handlers import TimedRotatingFileHandler
 
 from pathlib import Path
-from LOGGING import initializeLogger
+# from LOGGING import initializeLogger
 
+def initializeLogger(logger_name, LOGS_PATH="LOGS"):
+    logger = None
+
+    try:
+        LOG_BACKUP_COUNT = 2
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        log_file = os.path.join(LOGS_PATH, f"{logger_name}.log")
+        file_handler = TimedRotatingFileHandler(log_file, when='midnight', backupCount=LOG_BACKUP_COUNT)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.debug(f"Logger initialized for {logger_name}")
+    except Exception as e:
+        print(f"initializeLogger() Exception for {logger_name}: {e}")
+        print(traceback.format_exc())
+
+    return logger
 
 BASE_FILE_PATH = os.environ.get("BASE_FILE_PATH","/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/")
 LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
@@ -19,9 +41,9 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 
 # Directories to clean, in deletion priority order (oldest-first within each)
 CLEAN_DIRS = [
-    os.path.join(BASE_FILE_PATH, "DEBUGS", "TRASH"),      # trash first
     os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG"),    # raw captures next
-    os.path.join(BASE_FILE_PATH, "RESULTS"),               # result images last (JSON kept)
+    os.path.join(BASE_FILE_PATH, "DEBUGS", "RESULT"),    # result images last (JSON kept)
+    os.path.join(BASE_FILE_PATH, "DEBUGS", "TRASH"),      # trash last
 ]
 
 
@@ -33,22 +55,35 @@ def disk_percent() -> float:
 
 def collect_images(paths: list[str]) -> list[tuple[float, str]]:
     """
-    Walk all paths, collect image files (skip .json and every other ext).
-    Returns list of (mtime, filepath) sorted oldest-first.
+    Walk all paths and collect only image files.
+    Special handling for RESULTS folder:
+    - delete images inside DEFECT / NODEFECT
+    - keep json files
     """
     files = []
+
     for base in paths:
         if not os.path.isdir(base):
             continue
+
         for root, _, fnames in os.walk(base):
             for fname in fnames:
-                if Path(fname).suffix.lower() in IMAGE_EXTS:
-                    fp = os.path.join(root, fname)
-                    try:
+                fp = os.path.join(root, fname)
+                ext = Path(fname).suffix.lower()
+
+                try:
+                    # Skip JSON always
+                    if ext == ".json":
+                        continue
+
+                    # Normal image cleanup
+                    if ext in IMAGE_EXTS:
                         files.append((os.path.getmtime(fp), fp))
-                    except OSError:
-                        pass
-    files.sort()   # oldest mtime first
+
+                except OSError:
+                    pass
+
+    files.sort()  # oldest first
     return files
 
 
@@ -132,3 +167,10 @@ def start(logger=None):
     )
     t.start()
     return t
+
+
+# if __name__ == "__main__":
+#     # Start disk auto-cleaner daemon
+#     # start()
+#     logger = initializeLogger("DISK_CLEANER", LOGS_PATH=LOGS_PATH)
+#     _cleaner_loop(logger)
