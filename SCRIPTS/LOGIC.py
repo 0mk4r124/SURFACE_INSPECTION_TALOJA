@@ -146,6 +146,33 @@ def get_coil_id_from_millruns(conn, cycle_uid):
             
     return ""
 
+def find_orphan_cycle(base, idle_secs=30):
+    """
+    Restart safety: if LOGIC was down when a coil finished, a raw folder can
+    be left behind with no live start/stop session. This finds such a folder
+    (no new writes for `idle_secs`) so it can be processed & cleaned in batch.
+    Uses write-time staleness, NOT folder size.
+    Returns a cycle_uid or None.
+    """
+    if not os.path.exists(base):
+        return None
+    now = time.time()
+    for cycle_uid in sorted(os.listdir(base)):
+        cdir = os.path.join(base, cycle_uid)
+        if not os.path.isdir(cdir):
+            continue
+        newest, has_files = 0, False
+        for root, _, files in os.walk(cdir):
+            for fn in files:
+                has_files = True
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(root, fn)))
+                except OSError:
+                    pass
+        if has_files and (now - newest) > idle_secs:
+            return cycle_uid
+    return None
+
 def get_sorted_images(folder):
     files = [
         f for f in os.listdir(folder)
@@ -180,15 +207,19 @@ def process_labels(labels, img_shape):
             continue
 
         # normalize + filter
-        if "OIL_STAIN" in raw_cls:
+        if "OIL_STAIN" == raw_cls:
             cls = "O"
-        elif "WHITE_SPOT" in raw_cls:
+        # elif "OIL_STAIN_SMALL" == raw_cls:
+        #     cls = "O"
+        elif "OIL_STAIN_FAINT" == raw_cls:
+            cls = "O"
+        elif "WHITE_SPOT" == raw_cls:
             cls = "W"
-        elif "SCORING" in raw_cls:
+        elif "SCORING" == raw_cls:
             cls = "S"
-        elif "DENT" in raw_cls:
+        elif "DENT" == raw_cls:
             cls = "D"
-        elif "SCRATCH" in raw_cls:
+        elif "SCRATCH" == raw_cls:
             cls = "C"
         else:
             continue
@@ -446,7 +477,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                 except Exception:
                     pass
 
-                mq_obj.publish("taloja/health", {"service": "WRITER"})
+                mq_obj.publish("taloja/health", {"service": "LOGIC"})
 
             except Exception as e:
                 print(f"Error processing {image_name}: {e}")
@@ -562,6 +593,143 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     # shutil.move(base_path, trash_dest)
     shutil.rmtree(base_path)
 
+def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
+    """
+    Stream-process a cycle while capture is still running.
+    Starts on TRIGGER 'start' (handled in main), ends on TRIGGER 'stop'.
+    Deletes the raw folder ONLY after 'stop' + final drain.
+    """
+    base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
+    date_str = datetime.now().strftime('%Y%m%d')
+ 
+    conn = getDBconn()
+    try:
+        coil_id = get_coil_id_from_millruns(conn, cycle_uid)
+    except Exception:
+        coil_id = ""
+ 
+    print(f"\nStreaming cycle: {cycle_uid}")
+    logger.info(f"Streaming cycle: {cycle_uid}")
+ 
+    results = []
+    defect_summary = {
+        "cycle_uid": cycle_uid,
+        "coil_id": coil_id,
+        "total_frames": 0,
+        "total_defects": 0,
+        "defect_frames": 0,
+        "total_defective_frames": 0,
+        "O": 0, "W": 0, "S": 0,
+        "D": 0, "C": 0,
+    }
+ 
+    processed  = defaultdict(set)          # cam_serial -> {processed image names}
+    next_rank  = defaultdict(lambda: 1)    # cam_serial -> next rank to assign
+    stop_received = False
+    last_live = datetime.now()
+ 
+    while True:
+        mq_obj.publish("taloja/health", {"service": "LOGIC"})
+ 
+        # ---- 1) Watch for STOP from TRIGGER ----
+        data = mq_obj.data
+        if data and data.get("_consumed") is not True:
+            if data.get("action") == "stop" and data.get("roll_num") == cycle_uid:
+                mq_obj.data = {**data, "_consumed": True}
+                stop_received = True
+                print(f"STOP received for {cycle_uid}")
+                logger.info(f"STOP received for {cycle_uid}")
+                # let the last image finish writing before the final drain
+                time.sleep(1)
+            # a 'start' for a *different* cycle is left un-consumed on purpose,
+            # so main() can pick it up after we finish this one.
+ 
+        # ---- 2) Process any NEW images, per camera ----
+        got_new = False
+        if os.path.exists(base_path):
+            for cam_serial in sorted(os.listdir(base_path)):
+                cam_path = os.path.join(base_path, cam_serial)
+                if not os.path.isdir(cam_path):
+                    continue
+ 
+                all_imgs = get_sorted_images(cam_path)
+                new_imgs = [f for f in all_imgs if f not in processed[cam_serial]]
+ 
+                # While still capturing, skip the newest file (may be mid-write).
+                # After stop, capture has ended, so process everything.
+                if not stop_received and new_imgs:
+                    new_imgs = new_imgs[:-1]
+ 
+                if not new_imgs:
+                    continue
+                got_new = True
+ 
+                # Assign continuous ranks, split odd/even across the two models
+                batch, r = [], next_rank[cam_serial]
+                for name in new_imgs:
+                    batch.append((r, name))
+                    r += 1
+                next_rank[cam_serial] = r
+ 
+                first_half  = [(rk, im) for rk, im in batch if rk % 2 == 1]
+                second_half = [(rk, im) for rk, im in batch if rk % 2 == 0]
+ 
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    f1 = executor.submit(process_images, cycle_uid, coil_id, cam_path,
+                                         first_half,  model_1, cam_serial,
+                                         defect_summary, mq_obj, results)
+                    f2 = executor.submit(process_images, cycle_uid, coil_id, cam_path,
+                                         second_half, model_2, cam_serial,
+                                         defect_summary, mq_obj, results)
+                    f1.result()
+                    f2.result()
+ 
+                for _, name in batch:
+                    processed[cam_serial].add(name)
+ 
+        # ---- 3) Keep live.json fresh during the run (every ~5s) ----
+        if (datetime.now() - last_live).total_seconds() > 5:
+            try:
+                update_live_json(cycle_uid, coil_id, defect_summary,
+                                 results=results, status="inprogress")
+            except Exception:
+                pass
+            last_live = datetime.now()
+ 
+        # ---- 4) Exit once stopped AND fully drained ----
+        if stop_received and not got_new:
+            break
+        if not got_new:
+            time.sleep(0.5)
+ 
+    # ================= FINALIZE (only reached after STOP) =================
+    print("Cycle Done (stream)")
+    logger.info(f"Cycle Done (stream): {cycle_uid}")
+ 
+    defect_json = {
+        "cycle_uid": cycle_uid,
+        "coil_id": coil_id,
+        "result": results,
+    }
+    json_dir = os.path.join(RESULT_PATH, date_str, cycle_uid)
+    os.makedirs(json_dir, exist_ok=True)
+    json_path = os.path.join(json_dir, f"{cycle_uid}_defect_data.json")
+    with open(json_path, "w") as f:
+        json.dump(defect_json, f, indent=4)
+    print("New JSON file created successfully.")
+ 
+    save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), json_path)
+ 
+    try:
+        update_live_json(cycle_uid, coil_id, defect_summary,
+                         results=results, status="completed")
+    except Exception:
+        pass
+ 
+    # ---- delete raw ONLY after stop + finalize ----
+    if os.path.exists(base_path):
+        shutil.rmtree(base_path)
+
 def is_folder_stable(folder):
     size1 = get_size(folder)
     time.sleep(2)
@@ -627,53 +795,72 @@ def update_live_json(cycle_uid=None, coil_id=None, defect_summary=None, results=
         logger.error(f"Failed to update live json: {traceback.format_exc()}")
 
 def main():
-
+ 
     model_1 = MASKRCNN(
         "taloja1",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_23JUNE"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_4JULY"),
         "model_final.pth",
         0.60,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_23JUNE/TALOJA_MODEL_23JUNE.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_4JULY/TALOJA_MODEL_4JULY.json"),
         False,
         GPU_ID=0
     )
-
+ 
     model_2 = MASKRCNN(
         "taloja2",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_23JUNE"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_4JULY"),
         "model_final.pth",
         0.60,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_23JUNE/TALOJA_MODEL_23JUNE.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_4JULY/TALOJA_MODEL_4JULY.json"),
         False,
         GPU_ID=0
     )
-
+ 
     mq_obj = MQTT("capture_monitor")
-
+    mq_obj.subscribe("taloja/capture")      # <-- receive TRIGGER start/stop
+ 
+    base = os.path.join(RAW_PATH, LOCATION)
+ 
     while True:
-
-        base = os.path.join(RAW_PATH, LOCATION)
-        mq_obj.publish("main/logic", {"roll_num": "--"})
-        print("WAITING FOR DATA")
         mq_obj.publish("taloja/health", {"service": "LOGIC"})
-
-        if not os.path.exists(base):
-            time.sleep(2)
+        mq_obj.publish("main/logic", {"roll_num": "--"})
+ 
+        # ---- 1) Trigger-driven streaming (primary path) ----
+        data = mq_obj.data
+        if data and data.get("_consumed") is not True:
+            action   = data.get("action", "")
+            roll_num = data.get("roll_num", "")
+            if action == "start" and roll_num:
+                mq_obj.data = {**data, "_consumed": True}
+                print(f"START received for {roll_num}")
+                logger.info(f"START received for {roll_num}")
+                try:
+                    process_cycle_stream(roll_num, model_1, model_2, mq_obj)
+                except Exception:
+                    logger.critical(f"process_cycle_stream error:\n{traceback.format_exc()}")
+                continue
+ 
+        # ---- 2) Restart/orphan recovery (batch, only when idle) ----
+        orphan = find_orphan_cycle(base, idle_secs=30)
+        if orphan:
+            print(f"Recovering orphan cycle: {orphan}")
+            logger.info(f"Recovering orphan cycle: {orphan}")
+            try:
+                process_cycle(orphan, model_1, model_2, mq_obj)
+            except Exception:
+                logger.critical(f"orphan recovery error:\n{traceback.format_exc()}")
             continue
-
-        for cycle_uid in os.listdir(base):
-            for cam_serial in os.listdir(os.path.join(base, cycle_uid)):
-                if len(os.listdir(os.path.join(base, cycle_uid, cam_serial))) > 5000: 
-                    process_cycle(cycle_uid, model_1, model_2, mq_obj)
-                else: break
-
-        time.sleep(2)
-
-if __name__=="__main__":
+ 
+        print("WAITING FOR DATA")
+        time.sleep(0.2)
+ 
+ 
+if __name__ == "__main__":
     while True:
-        try: main()
+        try:
+            main()
         except:
             print("Error in main() !")
             logger.critical(f"{traceback.format_exc()}")

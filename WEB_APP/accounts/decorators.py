@@ -7,7 +7,7 @@ from django.contrib import messages
 def password_expired(user):
     """Check if the user's password has expired."""
     date_joined = getattr(user, "date_joined", None)
-    if date_joined and ((timezone.now() - date_joined) > timedelta(days=30)):
+    if date_joined and ((timezone.now() - date_joined) > timedelta(days=90)):
         print("Yes")
         return True  
 

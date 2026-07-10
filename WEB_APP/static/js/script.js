@@ -156,7 +156,7 @@ function openDefectImage(point) {
     const frameNum = point.frame || point.r || "";
 
     const title = frameNum
-        ? `Frame ${frameNum} | ${point.length || ""} mm`
+        ? `Frame ${frameNum} | ${point.length != null ? Math.floor(point.length / 1000) : ""} m`
         : (DEFECT_NAMES[point.type] || point.type || "Defect");
 
     console.log("openDefectImage called with:", { point, rawPath, fallback, title });
@@ -319,8 +319,8 @@ class CoilMap {
         }
         const _s = document.getElementById(this.startLabelId);
         const _e = document.getElementById(this.endLabelId);
-        if (_s) _s.innerText = `${this.minLen} mm`;
-        if (_e) _e.innerText = `${this.maxLen} mm`;
+        if (_s) _s.innerText = `${this.minLen != null ? Math.floor(this.minLen / 1000) : "0"} m`
+        if (_e) _e.innerText = `${this.maxLen != null ? Math.floor(this.maxLen / 1000) : "1"} m`
     }
 
     getColor(type) {
@@ -530,6 +530,32 @@ function updateCameraImages() {
         .catch(err => console.error("Camera feed error:", err));
 }
 
+// Return the Taloja server's health status: "ACTIVE" / "INACTIVE" / "DISABLED" / null
+function getTalojaServerStatus() {
+    if (!systemData || typeof systemData !== "object") return null;
+    for (const [key, info] of Object.entries(systemData)) {
+        const isServer = (info.type || "").toUpperCase() === "SERVER";
+        const isTaloja = key.toUpperCase().includes("TALOJA");
+        if (isServer && isTaloja) return (info.status || "").toUpperCase();
+    }
+    return null;
+}
+
+// Dashboard LIVE badge: green "LIVE" when server ACTIVE, blue "Idle" otherwise
+function updateLiveBadge() {
+    const badge = document.getElementById("siBadge");
+    if (!badge) return;
+    const textEl = badge.querySelector(".si-live-text");
+    const isActive = getTalojaServerStatus() === "ACTIVE";
+    if (isActive) {
+        badge.classList.remove("idle");
+        if (textEl) textEl.textContent = "LIVE";
+    } else {
+        badge.classList.add("idle");
+        if (textEl) textEl.textContent = "IDLE";
+    }
+}
+
 // ======================== HEALTH TAB ========================
 function updateSystemStatus() {
     const cameraContainer = document.getElementById("camera-indicators");
@@ -567,6 +593,7 @@ async function fetchSystemStatus() {
         const data = await resp.json();
         systemData = data.data;
         updateSystemStatus();
+        updateLiveBadge();
     } catch (err) {
         console.error("fetchSystemStatus error:", err);
     }
@@ -694,7 +721,7 @@ function showRunDetails(data, meta) {
     document.getElementById("rdStatDefFrames").innerText = data.total_defective_frames || 0;
 
     // Per-type counts from frame.t summaries
-    const tc = { V: 0, D: 0, S: 0, C: 0 };
+    const tc = { O: 0, W: 0, D: 0, S: 0, C: 0 };
     (data.result || []).forEach(frame => {
         // Format 1: frame.t = { V: 3, D: 1 }
         if (frame.t && typeof frame.t === "object") {
@@ -704,14 +731,15 @@ function showRunDetails(data, meta) {
         }
         // Format 2: frame["V"] = [{pos_mm, c}, ...] ? same as live.json / prepareData() reads
         else {
-            ["V", "D", "S", "C"].forEach(type => {
+            ["O", "W", "D", "S", "C"].forEach(type => {
                 if (frame[type] && Array.isArray(frame[type])) {
                     tc[type] += frame[type].length;
                 }
             });
         }
     });
-    document.getElementById("rdStatV").innerText = tc.V;
+    document.getElementById("rdStatO").innerText = tc.O;
+    document.getElementById("rdStatW").innerText = tc.W;
     document.getElementById("rdStatD").innerText = tc.D;
     document.getElementById("rdStatS").innerText = tc.S;
     document.getElementById("rdStatC").innerText = tc.C;

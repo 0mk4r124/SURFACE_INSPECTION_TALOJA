@@ -146,7 +146,7 @@ def process_capture(flir, mq_obj, logger):
                         counter += 1
 
                         data = mq_obj.data
-                        mq_obj.publish("taloja/health", {"service": "TRIGGER"})
+                        mq_obj.publish("taloja/health", {"service": "CAPTURE"})
 
                         if data and data.get("_consumed") is not True:
                             action = data.get("action", "")
@@ -229,7 +229,7 @@ def process_capture(flir, mq_obj, logger):
                         
                     cv2.imwrite(comp_path, img)
                     retries[cam_serial] = 0
-                    print("Waiting for the trigger")
+                    print(f"Waiting for the trigger       - {datetime.now()}")
                     time.sleep(2)
 
         except Exception as e:

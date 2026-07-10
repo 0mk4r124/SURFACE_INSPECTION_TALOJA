@@ -845,3 +845,16 @@ body {
     color: #485060;
     font-family: 'Courier New', monospace;
 }
+
+/* Idle state: Taloja server offline/inactive -> blue */
+.si-live-badge.idle {
+    background: rgba(13, 110, 253, 0.06);
+    border-color: rgba(13, 110, 253, 0.25);
+}
+.si-live-badge.idle .si-live-dot {
+    background: #0d6efd;   /* blue */
+    animation: none;       /* not live -> stop the blink */
+}
+.si-live-badge.idle .si-live-text {
+    color: #0d6efd;        /* blue */
+}

@@ -102,7 +102,7 @@ def main():
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     conn = getDBconn()
                     coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
-                    print(f"Trigger recieved - {roll_num} - {coil_id}")
+                    print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()}")
                     logger.info(f"Trigger recieved - {roll_num} - {coil_id}")
                     time.sleep(2)
 
