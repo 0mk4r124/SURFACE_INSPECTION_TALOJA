@@ -241,7 +241,10 @@ def process_labels(labels, img_shape):
         elif "WHITE_SPOT" == raw_cls:
             cls = "W"
         elif "SCORING" == raw_cls:
-            cls = "S"
+            if score < 0.90:
+                cls = "O"
+            else:
+                cls = "S"
         elif "DENT" == raw_cls:
             cls = "D"
         elif "SCRATCH" == raw_cls:

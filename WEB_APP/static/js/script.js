@@ -342,13 +342,48 @@ class CoilMap {
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         this.visiblePoints = [];
+
+        const R = 3;              // radius 3 -> 2 (diameter reduced by 2 units: 6px -> 4px)
+        const CELL = R * 2;       // grid cell = point diameter, guarantees no overlap
+        const cols = Math.ceil(this.canvas.width / CELL) + 4;
+        const occupied = new Set();
+
         for (let defect of this.defects) {
             if (!this.filters[defect.type]) continue;
             const p = this.mapPoint(defect);
             if (p.x < -10 || p.x > this.canvas.width + 10) continue;
-            this.visiblePoints.push({ ...defect, ...p });
+
+            // Snap to a collision grid; if the cell is taken, spiral outward
+            // to the nearest free cell so points never overlap.
+            let cx = Math.round(p.x / CELL);
+            let cy = Math.round(p.y / CELL);
+            let key = cy * cols + cx;
+
+            if (occupied.has(key)) {
+                let placed = false;
+                for (let ring = 1; ring <= 8 && !placed; ring++) {
+                    for (let dy = -ring; dy <= ring && !placed; dy++) {
+                        for (let dx = -ring; dx <= ring && !placed; dx++) {
+                            if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+                            const ny = cy + dy, nx = cx + dx;
+                            const py = ny * CELL;
+                            if (py < R || py > this.canvas.height - R) continue;
+                            const nKey = ny * cols + nx;
+                            if (!occupied.has(nKey)) {
+                                cx = nx; cy = ny; key = nKey; placed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            occupied.add(key);
+
+            const fx = cx * CELL;
+            const fy = Math.min(Math.max(cy * CELL, R), this.canvas.height - R);
+
+            this.visiblePoints.push({ ...defect, x: fx, y: fy });
             ctx.beginPath();
-            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.arc(fx, fy, R, 0, Math.PI * 2);
             ctx.fillStyle = this.getColor(defect.type);
             ctx.fill();
         }
