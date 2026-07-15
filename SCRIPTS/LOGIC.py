@@ -516,7 +516,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
 
 def process_cycle(cycle_uid, model_1, model_2, mq_obj):
     base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
-    date_str = datetime.now().strftime('%Y%m%d')
+    date_str = cycle_uid.split("_")[1][:8]
     conn = getDBconn()
 
     try:
@@ -626,7 +626,7 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
     Deletes the raw folder ONLY after 'stop' + final drain.
     """
     base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
-    date_str = datetime.now().strftime('%Y%m%d')
+    date_str = cycle_uid.split("_")[1][:8]
  
     conn = getDBconn()
     try:
@@ -747,8 +747,7 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
     save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), json_path)
  
     try:
-        update_live_json(cycle_uid, coil_id, defect_summary,
-                         results=results, status="completed")
+        update_live_json(cycle_uid, coil_id, defect_summary,results=results, status="completed")
     except Exception:
         pass
  
