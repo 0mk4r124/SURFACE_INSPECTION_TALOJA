@@ -173,6 +173,31 @@ def find_orphan_cycle(base, idle_secs=30):
             return cycle_uid
     return None
 
+def save_image_with_compression(img, output_path, quality_percent=60):
+    if img is None:
+        return False
+
+    ext = os.path.splitext(output_path)[1].lower()
+    if ext in {".jpg", ".jpeg"}:
+        params = [int(cv2.IMWRITE_JPEG_QUALITY), quality_percent]
+        output_ext = ".jpg"
+    elif ext == ".png":
+        png_level = min(9, max(0, int(round((100 - quality_percent) / 10))))
+        params = [int(cv2.IMWRITE_PNG_COMPRESSION), png_level]
+        output_ext = ".png"
+    else:
+        params = [int(cv2.IMWRITE_JPEG_QUALITY), quality_percent]
+        output_ext = ".jpg"
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    success, encoded = cv2.imencode(output_ext, img, params)
+    if success:
+        with open(output_path, "wb") as f:
+            f.write(encoded.tobytes())
+        return True
+
+    return False
+
 def get_sorted_images(folder):
     files = [
         f for f in os.listdir(folder)
@@ -435,15 +460,16 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                         mq_obj.publish("ui/logic", defect_summary)
 
                 # RESULT
-                save_dir = os.path.join(RESULT_PATH, date_str, cycle_uid, folder)
-                os.makedirs(save_dir, exist_ok=True)
-                save_path = os.path.join(save_dir, new_name)
-                cv2.imwrite(save_path, annotated)
+                # save_dir = os.path.join(RESULT_PATH, date_str, cycle_uid, folder)
+                # os.makedirs(save_dir, exist_ok=True)
+                # save_path = os.path.join(save_dir, new_name)
+                # cv2.imwrite(save_path, annotated)
                 # TRASH
                 save_dir = os.path.join(TRASH_PATH, cycle_uid, cam_serial)
                 os.makedirs(save_dir, exist_ok=True)
                 save_path = os.path.join(save_dir, image_name)
-                cv2.imwrite(save_path, img)
+                save_image_with_compression(img, save_path, quality_percent=60)
+                # cv2.imwrite(save_path, img)
                 # TEMP
                 cv2.imwrite(f"{TEMP_PATH}/{LOCATION}/{cam_serial}_debug.jpg", annotated)
 
