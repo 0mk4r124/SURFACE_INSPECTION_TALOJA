@@ -111,6 +111,9 @@ zoomWrapper.addEventListener("mouseleave", () => {
 
 // Clean up when modal is hidden
 document.getElementById("imageModal").addEventListener("hidden.bs.modal", function () {
+    if (modalImg.src && modalImg.src.startsWith("blob:")) {
+        URL.revokeObjectURL(modalImg.src);
+    }
     modalImg.src = "";
     modalImg.style.display = "none";
     imageLoader.style.display = "none";
@@ -227,7 +230,18 @@ function openDefectImage(point) {
             ctx.fillStyle = "#000000";
             ctx.fillText(label, labelX + 6, labelY - 6);
 
-            openImageModal(canvas.toDataURL("image/jpeg", 0.92), title);
+            // openImageModal(canvas.toDataURL("image/jpeg", 0.92), title);
+            canvas.toBlob(function (blob) {
+                if (!blob) {
+                    console.error("BOX DEBUG -> toBlob failed, canvas too large:", canvas.width, canvas.height);
+                    if (fallback) {
+                        openImageModal("/api/serve-file?file=" + encodeURIComponent(fallback), title);
+                    }
+                    return;
+                }
+                const blobUrl = URL.createObjectURL(blob);
+                openImageModal(blobUrl, title);
+            }, "image/jpeg", 0.92);
         };
 
         tmpImg.onerror = function () {

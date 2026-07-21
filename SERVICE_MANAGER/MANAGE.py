@@ -453,7 +453,7 @@ class DashboardTab(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("? Service Manager")
+        self.setWindowTitle("Service Manager")
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
 
         self.tabs = QTabWidget()

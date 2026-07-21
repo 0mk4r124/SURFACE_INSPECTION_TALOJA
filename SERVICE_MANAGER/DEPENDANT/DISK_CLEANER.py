@@ -36,6 +36,7 @@ LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
 DISK_CHECK_INTERVAL = 60   # seconds between routine checks
 TRIGGER_PCT         = 95   # start cleaning above this %
 TARGET_PCT          = 70   # stop cleaning once below this %
+RETENTION_DAYS      = 7    # NEVER delete files newer than this
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 
@@ -54,13 +55,8 @@ def disk_percent() -> float:
 
 
 def collect_images(paths: list[str]) -> list[tuple[float, str]]:
-    """
-    Walk all paths and collect only image files.
-    Special handling for RESULTS folder:
-    - delete images inside DEFECT / NODEFECT
-    - keep json files
-    """
-    files = []
+    files  = []
+    cutoff = time.time() - (RETENTION_DAYS * 86400)   # ← NEW
 
     for base in paths:
         if not os.path.isdir(base):
@@ -72,13 +68,13 @@ def collect_images(paths: list[str]) -> list[tuple[float, str]]:
                 ext = Path(fname).suffix.lower()
 
                 try:
-                    # Skip JSON always
                     if ext == ".json":
                         continue
 
-                    # Normal image cleanup
                     if ext in IMAGE_EXTS:
-                        files.append((os.path.getmtime(fp), fp))
+                        mtime = os.path.getmtime(fp)
+                        if mtime < cutoff:            # ← NEW: only files older than 7 days
+                            files.append((mtime, fp))
 
                 except OSError:
                     pass
@@ -145,6 +141,14 @@ def _cleaner_loop(logger):
                     f"freed={freed_bytes / (1024**3):.2f} GB | "
                     f"disk now={disk_percent():.1f}%"
                 )
+
+                # NEW: retention guard notice
+                if disk_percent() >= TRIGGER_PCT:
+                    logger.warning(
+                        f"[DISK] Still at {disk_percent():.1f}% but all remaining files "
+                        f"are within the {RETENTION_DAYS}-day retention window — "
+                        "no further deletion. Manual intervention may be required."
+                    )
 
         except Exception:
             logger.error(f"[DISK] Cleaner loop error:\n{traceback.format_exc()}")

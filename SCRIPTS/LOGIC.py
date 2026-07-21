@@ -9,7 +9,7 @@ import pymysql
 from datetime import datetime
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from threading import Lock, Event
 
 from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
@@ -35,9 +35,31 @@ db_host = os.environ.get('db_host', "127.0.0.1")
 db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
 PADDING = 50
+
+# ---- live.json tuning ----
+LIVE_JSON_INTERVAL = 10   # seconds between live.json writes
+LIVE_RESULTS_KEEP  = 50   # only the last N results go into live.json (full list stays in final JSON)
+
+# ---- speed / storage tuning ----
+DEBUG_IMG_INTERVAL = 2.0  # write <cam>_debug.jpg at most once per this many secs
+MQTT_UI_INTERVAL   = 1.0  # publish ui/logic + health at most once per this many secs
+SAVE_SCALE   = float(os.environ.get('SAVE_SCALE', '0.5'))  # stored trash copy is downscaled (inference stays full-size)
+SAVE_QUALITY = int(os.environ.get('SAVE_QUALITY', '60'))   # JPEG quality of stored trash copy
+
+# ---- background orphan recovery ----
+ORPHAN_MAX = 3            # up to this many orphan cycles recovered in parallel (background)
+ORPHAN_YIELD_SLEEP = 0.25 # per-frame pause for bg orphans while a LIVE cycle is running (GPU priority to live)
+
 update_lock = Lock()
 summary_lock = Lock()
 result_lock = Lock()
+debug_lock = Lock()
+_last_debug_write = {}   # cam_serial -> last debug jpg write time
+
+LIVE_ACTIVE = Event()     # set while a streaming (live) cycle is running
+_active_orphans = set()   # cycle_uids currently being recovered in background
+_orphan_lock = Lock()
+
 ALLOWED_DEFECTS = {"O", "W", "S", "D", "C"}
 DEFECT_CONFIG = {
     "O": {"name": "OIL_STAIN", "color": (255, 0, 0)},      # Blue
@@ -51,16 +73,15 @@ logger = initializeLogger("LOGIC", LOGS_PATH=LOGS_PATH)
 
 def getDBconn():
     conn = None
-    try: 
+    try:
         conn = pymysql.connect(
             host= db_host,
             user= db_user,
             password= db_pass,
             database= db_name
         )
-    except Exception as e:
-        print(f"DB Error: {e}")
-        logger.error(f"{traceback.format_exc()}")
+    except Exception:
+        logger.error(f"DB connect failed: {traceback.format_exc()}")
 
     return conn
 
@@ -70,7 +91,6 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, json_path):
     try:
         cursor = conn.cursor()
 
-        # Check if record exists
         check_query = """
             SELECT 1
             FROM DEFECTS_HISTORY
@@ -118,9 +138,8 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, json_path):
 
         conn.commit()
 
-    except Exception as e:
-        print(f"DB Error: {e}")
-        logger.error(f"{traceback.format_exc()}")
+    except Exception:
+        logger.error(f"save_defect_history failed: {traceback.format_exc()}")
 
     finally:
         if cursor:
@@ -129,7 +148,7 @@ def save_defect_history(conn, cycle_uid, coil_id, defect_details, json_path):
 def get_coil_id_from_millruns(conn, cycle_uid):
     if conn is None:
         return ""
-    
+
     cursor = None
     try:
         cursor = conn.cursor()
@@ -143,7 +162,7 @@ def get_coil_id_from_millruns(conn, cycle_uid):
     finally:
         if cursor:
             cursor.close()
-            
+
     return ""
 
 def find_orphan_cycle(base, idle_secs=30):
@@ -173,30 +192,52 @@ def find_orphan_cycle(base, idle_secs=30):
             return cycle_uid
     return None
 
-def save_image_with_compression(img, output_path, quality_percent=60):
-    if img is None:
+def find_orphan_cycles(base, idle_secs=30, exclude=None):
+    """Like find_orphan_cycle but returns ALL stale cycle folders (minus `exclude`)."""
+    exclude = exclude or set()
+    found = []
+    if not os.path.exists(base):
+        return found
+    now = time.time()
+    for cycle_uid in sorted(os.listdir(base)):
+        if cycle_uid in exclude:
+            continue
+        cdir = os.path.join(base, cycle_uid)
+        if not os.path.isdir(cdir):
+            continue
+        newest, has_files = 0, False
+        for root, _, files in os.walk(cdir):
+            for fn in files:
+                has_files = True
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(root, fn)))
+                except OSError:
+                    pass
+        if has_files and (now - newest) > idle_secs:
+            found.append(cycle_uid)
+    return found
+
+def save_small_compressed(img, output_path, scale=SAVE_SCALE, quality=SAVE_QUALITY):
+    """
+    Store a SMALL copy of the frame: downscaled by `scale` and JPEG-compressed.
+    Inference always runs on the full-size image; only the stored copy shrinks.
+    Runs in a background saver thread so it never blocks the GPU loop.
+    """
+    try:
+        if img is None:
+            return False
+        if scale and scale != 1.0:
+            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        ok, encoded = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+        if ok:
+            with open(output_path, "wb") as f:
+                f.write(encoded.tobytes())
+            return True
         return False
-
-    ext = os.path.splitext(output_path)[1].lower()
-    if ext in {".jpg", ".jpeg"}:
-        params = [int(cv2.IMWRITE_JPEG_QUALITY), quality_percent]
-        output_ext = ".jpg"
-    elif ext == ".png":
-        png_level = min(9, max(0, int(round((100 - quality_percent) / 10))))
-        params = [int(cv2.IMWRITE_PNG_COMPRESSION), png_level]
-        output_ext = ".png"
-    else:
-        params = [int(cv2.IMWRITE_JPEG_QUALITY), quality_percent]
-        output_ext = ".jpg"
-
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    success, encoded = cv2.imencode(output_ext, img, params)
-    if success:
-        with open(output_path, "wb") as f:
-            f.write(encoded.tobytes())
-        return True
-
-    return False
+    except Exception:
+        logger.error(f"save_small_compressed failed for {output_path}: {traceback.format_exc()}")
+        return False
 
 def get_sorted_images(folder):
     files = [
@@ -234,8 +275,6 @@ def process_labels(labels, img_shape):
         # normalize + filter
         if "OIL_STAIN" == raw_cls:
             cls = "O"
-        # elif "OIL_STAIN_SMALL" == raw_cls:
-        #     cls = "O"
         elif "OIL_STAIN_FAINT" == raw_cls:
             cls = "O"
         elif "WHITE_SPOT" == raw_cls:
@@ -312,7 +351,6 @@ def draw_boxes(img, defect_boxes):
                 f"{distance_mm:.1f}mm"
             )
 
-            # Draw defect box
             cv2.rectangle(
                 img,
                 (x1, y1),
@@ -321,7 +359,6 @@ def draw_boxes(img, defect_boxes):
                 2
             )
 
-            # Background for text
             (tw, th), _ = cv2.getTextSize(
                 label,
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -362,119 +399,118 @@ def add_summary(img, counts, severity, distance):
 
     summary_text = " | ".join(summary)
 
-    cv2.putText(
-        img,
-        f"Length : {distance} mm",
-        (20, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2
-    )
-
-    cv2.putText(
-        img,
-        f"SEVERITY : {severity}",
-        (20, 80),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2
-    )
-
-    cv2.putText(
-        img,
-        f"TOTAL DEFECTS : {total}",
-        (20, 120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2
-    )
-
-    cv2.putText(
-        img,
-        f"SUMMARY : {summary_text}",
-        (20, 160),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (255, 255, 255),
-        2
-    )
+    cv2.putText(img, f"Length : {distance} mm", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(img, f"SEVERITY : {severity}", (20, 80),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(img, f"TOTAL DEFECTS : {total}", (20, 120),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(img, f"SUMMARY : {summary_text}", (20, 160),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
     return img
 
-def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results):
-    defect_json, counts = {}, {}
+def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results, bg_orphan=False):
     date_str = datetime.now().strftime('%Y%m%d')
     last_update = datetime.now()
+    last_mq = 0.0
 
-    for rank, image_name in image_items:
-        print("Ranking:", rank, " - Processing:", image_name)
-        try:
-            img_path = os.path.join(cam_path, image_name)
+    items = list(image_items)
+    if not items:
+        return results
 
-            diameter = (image_name.split("__")[1]).split("_")[0]
-            eg_setpoint = (image_name.split("__")[1]).split("_")[2]
-            distance = (image_name.split("__")[1]).split("_")[4]
+    # loader: decodes the NEXT image from disk while the GPU runs the current one
+    # saver:  compresses + writes the small trash copy without blocking the GPU
+    loader = ThreadPoolExecutor(max_workers=1)
+    saver = ThreadPoolExecutor(max_workers=1)
+    next_future = loader.submit(cv2.imread, os.path.join(cam_path, items[0][1]))
 
-            img = cv2.imread(img_path)
-            if img is None:
-                continue
+    try:
+        for i, (rank, image_name) in enumerate(items):
             try:
-                masked_img, labels = model.run_inference(img)
+                img_path = os.path.join(cam_path, image_name)
+
+                meta = image_name.split("__")[1].split("_")
+                diameter = meta[0]
+                eg_setpoint = meta[2]
+                distance = meta[4]
+
+                img = next_future.result() if next_future is not None else cv2.imread(img_path)
+
+                # prefetch the next image immediately
+                if i + 1 < len(items):
+                    next_future = loader.submit(
+                        cv2.imread, os.path.join(cam_path, items[i + 1][1])
+                    )
+                else:
+                    next_future = None
+
+                if img is None:
+                    continue
+
+                # bg orphans yield GPU priority to the LIVE cycle
+                if bg_orphan and LIVE_ACTIVE.is_set():
+                    time.sleep(ORPHAN_YIELD_SLEEP)
+
+                # ---- inference: ALWAYS on the full-size image ----
+                # per-model lock: live + bg orphan threads share the models safely
+                infer_lock = getattr(model, "infer_lock", None)
+                if infer_lock is not None:
+                    with infer_lock:
+                        masked_img, labels = model.run_inference(img)
+                else:
+                    masked_img, labels = model.run_inference(img)
 
                 boxes, counts = process_labels(labels, img.shape)
                 total = sum(counts.values())
                 severity = calculate_severity(total)
 
-                annotated = draw_boxes(img.copy(), boxes)
-                annotated = add_summary(annotated, counts, severity, distance)
-
-                # ---- FILE NAMING ---- #
-                if total > 0:
-                    folder = "DEFECT"
-                    defect_str = "_".join([f"{k}{v}" for k, v in counts.items()])
-                    new_name = f"{rank}_{distance}_{defect_str}.jpg"
-
-                    with summary_lock:
-                        defect_summary["processed_at"] = datetime.now().isoformat()
-                        defect_summary["last_severity"] = severity
-                        defect_summary["distance"] = distance
+                # ---- counters under lock, publish OUTSIDE the lock ----
+                with summary_lock:
+                    defect_summary["processed_at"] = datetime.now().isoformat()
+                    defect_summary["last_severity"] = severity
+                    defect_summary["distance"] = distance
+                    if total > 0:
                         defect_summary["O"] += counts.get("S", 0)
                         defect_summary["W"] += counts.get("D", 0)
                         defect_summary["S"] += counts.get("S", 0)
                         defect_summary["D"] += counts.get("D", 0)
                         defect_summary["C"] += counts.get("C", 0)
                         defect_summary["total_defects"] += counts.get("O", 0) + counts.get("W", 0) + counts.get("S", 0) + counts.get("D", 0) + counts.get("C", 0)
-                        # increment defect frame counters
                         defect_summary["defect_frames"] = defect_summary.get("defect_frames", 0) + 1
                         defect_summary["total_defective_frames"] = defect_summary.get("total_defective_frames", 0) + 1
-                        mq_obj.publish("ui/logic", defect_summary)
-                else:
-                    folder = "NODEFECT"
-                    defect_str = "NODEFECT"
-                    new_name = f"{rank}_{distance}.jpg"
+                    defect_summary["total_frames"] = defect_summary.get("total_frames", 0) + 1
+                    summary_snapshot = dict(defect_summary)
 
-                    with summary_lock:
-                        defect_summary["processed_at"] = datetime.now().isoformat()
-                        defect_summary["last_severity"] = severity
-                        defect_summary["distance"] = distance
-                        mq_obj.publish("ui/logic", defect_summary)
+                now_t = time.time()
+                if (total > 0 or (now_t - last_mq) > MQTT_UI_INTERVAL):
+                    # bg orphans send health only; ui/logic stays reserved for the live cycle
+                    if not bg_orphan:
+                        mq_obj.publish("ui/logic", summary_snapshot)
+                    mq_obj.publish("taloja/health", {"service": "LOGIC"})
+                    last_mq = now_t
 
-                # RESULT
-                # save_dir = os.path.join(RESULT_PATH, date_str, cycle_uid, folder)
-                # os.makedirs(save_dir, exist_ok=True)
-                # save_path = os.path.join(save_dir, new_name)
-                # cv2.imwrite(save_path, annotated)
-                # TRASH
+                # ---- TRASH: small compressed copy, saved in background ----
                 save_dir = os.path.join(TRASH_PATH, cycle_uid, cam_serial)
-                os.makedirs(save_dir, exist_ok=True)
                 save_path = os.path.join(save_dir, image_name)
-                save_image_with_compression(img, save_path, quality_percent=60)
-                # cv2.imwrite(save_path, img)
-                # TEMP
-                cv2.imwrite(f"{TEMP_PATH}/{LOCATION}/{cam_serial}_debug.jpg", annotated)
+                saver.submit(save_small_compressed, img, save_path)
+
+                # ---- TEMP debug jpg: at most once per DEBUG_IMG_INTERVAL per camera ----
+                # bg orphans never touch the debug preview (it belongs to the live cycle)
+                write_debug = False
+                if not bg_orphan:
+                    with debug_lock:
+                        if (now_t - _last_debug_write.get(cam_serial, 0.0)) > DEBUG_IMG_INTERVAL:
+                            _last_debug_write[cam_serial] = now_t
+                            write_debug = True
+                if write_debug:
+                    annotated = draw_boxes(img.copy(), boxes)
+                    annotated = add_summary(annotated, counts, severity, distance)
+                    cv2.imwrite(
+                        f"{TEMP_PATH}/{LOCATION}/{cam_serial}_debug.jpg",
+                        annotated,
+                        [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                    )
 
                 defect_json = {
                     "r": rank,
@@ -485,39 +521,32 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                     **boxes,
                     "t": counts,
                     "img": save_path,
-                    "raw_img": os.path.join(TRASH_PATH, cycle_uid, cam_serial, image_name),
+                    "raw_img": save_path,
                 }
 
-                # increment total frames processed
-                try:
-                    with summary_lock:
-                        defect_summary["total_frames"] = defect_summary.get("total_frames", 0) + 1
-                    with result_lock:
-                        results.append(defect_json)
-                except Exception:
-                    pass
+                with result_lock:
+                    results.append(defect_json)
 
-                # update live.json with final summary and results
-                try:
-                    with update_lock:
-                        if (datetime.now()-last_update).total_seconds() > 10:
-                            update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="inprogress")
-                            last_update = datetime.now()
-                except Exception:
-                    pass
+                # live.json refresh (throttled) - bg orphans never write live.json
+                if not bg_orphan:
+                    try:
+                        with update_lock:
+                            if (datetime.now() - last_update).total_seconds() > LIVE_JSON_INTERVAL:
+                                update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="inprogress")
+                                last_update = datetime.now()
+                    except Exception:
+                        pass
 
-                mq_obj.publish("taloja/health", {"service": "LOGIC"})
+            except Exception:
+                logger.error(f"Error processing {image_name}: {traceback.format_exc()}")
 
-            except Exception as e:
-                print(f"Error processing {image_name}: {e}")
-                logger.error(f"{traceback.format_exc()}")
-
-        except Exception as e:
-            print(f"Error processing {image_name}: {e}")
+    finally:
+        loader.shutdown(wait=False)
+        saver.shutdown(wait=True)   # ensure all trash copies are on disk before finalize
 
     return results
 
-def process_cycle(cycle_uid, model_1, model_2, mq_obj):
+def process_cycle(cycle_uid, model_1, model_2, mq_obj, bg_orphan=False):
     base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
     date_str = cycle_uid.split("_")[1][:8]
     conn = getDBconn()
@@ -529,8 +558,8 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
 
     if not os.path.exists(base_path):
         return
-    
-    print(f"\nProcessing cycle: {cycle_uid}")
+
+    logger.info(f"Processing cycle: {cycle_uid} (bg_orphan={bg_orphan})")
     results = []
     defect_summary = {
         "cycle_uid": cycle_uid,
@@ -543,6 +572,9 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
         "D": 0, "C": 0,
     }
 
+    if not bg_orphan:
+        reset_live_cache()
+
     for cam_serial in os.listdir(base_path):
         cam_path = os.path.join(base_path, cam_serial)
         image_list = get_sorted_images(cam_path)
@@ -553,13 +585,14 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
         second_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 0]
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(process_images, cycle_uid, coil_id, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results)
-            future_2 = executor.submit(process_images, cycle_uid, coil_id, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results)
-            
+            future_1 = executor.submit(process_images, cycle_uid, coil_id, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results, bg_orphan)
+            future_2 = executor.submit(process_images, cycle_uid, coil_id, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results, bg_orphan)
+
             future_1.result()
             future_2.result()
 
-    print(f"Cycle Done")
+    print(f"Cycle Done: {cycle_uid}")
+    logger.info(f"Cycle Done: {cycle_uid}")
 
     defect_json = {
         "cycle_uid": cycle_uid,
@@ -576,50 +609,33 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj):
             with open(json_path, "r") as f:
                 existing_data = json.load(f)
 
-            # If "result" is a list, append new results
             if isinstance(existing_data.get("result"), list) and isinstance(results, list):
                 existing_data["result"].extend(results)
             else:
-                # Otherwise overwrite/update
                 existing_data["result"] = results
 
             with open(json_path, "w") as f:
-                json.dump(existing_data, f, indent=4)
+                json.dump(existing_data, f)
 
-            print("Existing JSON updated successfully.")
+            logger.info(f"Existing JSON updated: {json_path}")
 
-        except Exception as e:
-            print(f"Failed to update JSON: {e}")
+        except Exception:
+            logger.error(f"Failed to update JSON: {traceback.format_exc()}")
 
     else:
         with open(json_path, "w") as f:
-            json.dump(defect_json, f, indent=4)
+            json.dump(defect_json, f)
+        logger.info(f"New JSON created: {json_path}")
 
-    print("New JSON file created successfully.")
-
-    img_dir = os.path.join(RESULT_PATH, date_str, cycle_uid)
     save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), json_path)
 
-    # update live.json with final summary and results
-    try:
-        update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="completed")
-    except Exception:
-        pass
+    # bg orphans never write live.json - the live view belongs to the streaming cycle
+    if not bg_orphan:
+        try:
+            update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="completed")
+        except Exception:
+            pass
 
-    defect_summary = {
-        "cycle_uid": "",
-        "total_frames": 0,
-        "total_defects": 0,
-        "defect_frames": 0,
-        "total_defective_frames": 0,
-        "D": 0, "W": 0, "S":0,
-        "O": 0, "C": 0,
-    }
-
-    # ---- MOVE TO TRASH ---- #
-    # trash_dest = os.path.join(TRASH_PATH, cycle_uid)
-    # if os.path.exists(trash_dest): shutil.rmtree(trash_dest)
-    # shutil.move(base_path, trash_dest)
     shutil.rmtree(base_path)
 
 def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
@@ -630,16 +646,16 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
     """
     base_path = os.path.join(RAW_PATH, LOCATION, cycle_uid)
     date_str = cycle_uid.split("_")[1][:8]
- 
+
     conn = getDBconn()
     try:
         coil_id = get_coil_id_from_millruns(conn, cycle_uid)
     except Exception:
         coil_id = ""
- 
-    print(f"\nStreaming cycle: {cycle_uid}")
+
+    print(f"Streaming cycle: {cycle_uid}")
     logger.info(f"Streaming cycle: {cycle_uid}")
- 
+
     results = []
     defect_summary = {
         "cycle_uid": cycle_uid,
@@ -651,59 +667,69 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
         "O": 0, "W": 0, "S": 0,
         "D": 0, "C": 0,
     }
- 
+
+    reset_live_cache()
+
     processed  = defaultdict(set)          # cam_serial -> {processed image names}
     next_rank  = defaultdict(lambda: 1)    # cam_serial -> next rank to assign
     stop_received = False
     last_live = datetime.now()
- 
-    while True:
-        mq_obj.publish("taloja/health", {"service": "LOGIC"})
- 
-        # ---- 1) Watch for STOP from TRIGGER ----
-        data = mq_obj.data
-        if data and data.get("_consumed") is not True:
-            if data.get("action") == "stop" and data.get("roll_num") == cycle_uid:
-                mq_obj.data = {**data, "_consumed": True}
-                stop_received = True
-                print(f"STOP received for {cycle_uid}")
-                logger.info(f"STOP received for {cycle_uid}")
-                # let the last image finish writing before the final drain
-                time.sleep(1)
-            # a 'start' for a *different* cycle is left un-consumed on purpose,
-            # so main() can pick it up after we finish this one.
- 
-        # ---- 2) Process any NEW images, per camera ----
-        got_new = False
-        if os.path.exists(base_path):
-            for cam_serial in sorted(os.listdir(base_path)):
-                cam_path = os.path.join(base_path, cam_serial)
-                if not os.path.isdir(cam_path):
-                    continue
- 
-                all_imgs = get_sorted_images(cam_path)
-                new_imgs = [f for f in all_imgs if f not in processed[cam_serial]]
- 
-                # While still capturing, skip the newest file (may be mid-write).
-                # After stop, capture has ended, so process everything.
-                if not stop_received and new_imgs:
-                    new_imgs = new_imgs[:-1]
- 
-                if not new_imgs:
-                    continue
-                got_new = True
- 
-                # Assign continuous ranks, split odd/even across the two models
-                batch, r = [], next_rank[cam_serial]
-                for name in new_imgs:
-                    batch.append((r, name))
-                    r += 1
-                next_rank[cam_serial] = r
- 
-                first_half  = [(rk, im) for rk, im in batch if rk % 2 == 1]
-                second_half = [(rk, im) for rk, im in batch if rk % 2 == 0]
- 
-                with ThreadPoolExecutor(max_workers=2) as executor:
+    last_health = 0.0
+
+    # ONE persistent worker pool for the whole cycle (was: new pool per batch)
+    executor = ThreadPoolExecutor(max_workers=2)
+
+    LIVE_ACTIVE.set()   # bg orphan workers slow down while this is set
+    try:
+        while True:
+            now_t = time.time()
+            if now_t - last_health > MQTT_UI_INTERVAL:
+                mq_obj.publish("taloja/health", {"service": "LOGIC"})
+                last_health = now_t
+
+            # ---- 1) Watch for STOP from TRIGGER ----
+            data = mq_obj.data
+            if data and data.get("_consumed") is not True:
+                if data.get("action") == "stop" and data.get("roll_num") == cycle_uid:
+                    mq_obj.data = {**data, "_consumed": True}
+                    print(f"STOP received for {cycle_uid}")
+                    logger.info(f"STOP received for {cycle_uid}")
+                    stop_received = True
+                    # let the last image finish writing before the final drain
+                    time.sleep(1)
+                # a 'start' for a *different* cycle is left un-consumed on purpose,
+                # so main() can pick it up after we finish this one.
+
+            # ---- 2) Process any NEW images, per camera ----
+            got_new = False
+            if os.path.exists(base_path):
+                for cam_serial in sorted(os.listdir(base_path)):
+                    cam_path = os.path.join(base_path, cam_serial)
+                    if not os.path.isdir(cam_path):
+                        continue
+
+                    all_imgs = get_sorted_images(cam_path)
+                    new_imgs = [f for f in all_imgs if f not in processed[cam_serial]]
+
+                    # While still capturing, skip the newest file (may be mid-write).
+                    # After stop, capture has ended, so process everything.
+                    if not stop_received and new_imgs:
+                        new_imgs = new_imgs[:-1]
+
+                    if not new_imgs:
+                        continue
+                    got_new = True
+
+                    # Assign continuous ranks, split odd/even across the two models
+                    batch, r = [], next_rank[cam_serial]
+                    for name in new_imgs:
+                        batch.append((r, name))
+                        r += 1
+                    next_rank[cam_serial] = r
+
+                    first_half  = [(rk, im) for rk, im in batch if rk % 2 == 1]
+                    second_half = [(rk, im) for rk, im in batch if rk % 2 == 0]
+
                     f1 = executor.submit(process_images, cycle_uid, coil_id, cam_path,
                                          first_half,  model_1, cam_serial,
                                          defect_summary, mq_obj, results)
@@ -712,29 +738,33 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
                                          defect_summary, mq_obj, results)
                     f1.result()
                     f2.result()
- 
-                for _, name in batch:
-                    processed[cam_serial].add(name)
- 
-        # ---- 3) Keep live.json fresh during the run (every ~5s) ----
-        if (datetime.now() - last_live).total_seconds() > 5:
-            try:
-                update_live_json(cycle_uid, coil_id, defect_summary,
-                                 results=results, status="inprogress")
-            except Exception:
-                pass
-            last_live = datetime.now()
- 
-        # ---- 4) Exit once stopped AND fully drained ----
-        if stop_received and not got_new:
-            break
-        if not got_new:
-            time.sleep(0.5)
- 
+
+                    for _, name in batch:
+                        processed[cam_serial].add(name)
+
+            # ---- 3) Keep live.json fresh during the run ----
+            if (datetime.now() - last_live).total_seconds() > LIVE_JSON_INTERVAL:
+                try:
+                    update_live_json(cycle_uid, coil_id, defect_summary,
+                                     results=results, status="inprogress")
+                except Exception:
+                    pass
+                last_live = datetime.now()
+
+            # ---- 4) Exit once stopped AND fully drained ----
+            if stop_received and not got_new:
+                break
+            if not got_new:
+                time.sleep(0.5)
+
+    finally:
+        LIVE_ACTIVE.clear()
+        executor.shutdown(wait=True)
+
     # ================= FINALIZE (only reached after STOP) =================
-    print("Cycle Done (stream)")
+    print(f"Cycle Done (stream): {cycle_uid}")
     logger.info(f"Cycle Done (stream): {cycle_uid}")
- 
+
     defect_json = {
         "cycle_uid": cycle_uid,
         "coil_id": coil_id,
@@ -744,86 +774,97 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
     os.makedirs(json_dir, exist_ok=True)
     json_path = os.path.join(json_dir, f"{cycle_uid}_defect_data.json")
     with open(json_path, "w") as f:
-        json.dump(defect_json, f, indent=4)
-    print("New JSON file created successfully.")
- 
+        json.dump(defect_json, f)
+    logger.info(f"New JSON created: {json_path}")
+
     save_defect_history(conn, cycle_uid, coil_id, json.dumps(defect_summary), json_path)
- 
+
     try:
-        update_live_json(cycle_uid, coil_id, defect_summary,results=results, status="completed")
+        update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="completed")
     except Exception:
         pass
- 
+
     # ---- delete raw ONLY after stop + finalize ----
     if os.path.exists(base_path):
         shutil.rmtree(base_path)
 
-def is_folder_stable(folder):
-    size1 = get_size(folder)
-    time.sleep(2)
-    size2 = get_size(folder)
-    return size1 == size2
+# ---- live.json: in-memory cache, no re-reading the file on every write ----
+_live_cache = None
+_live_cache_lock = Lock()
 
-def get_size(folder):
-    total = 0
-    for root, _, files in os.walk(folder):
-        for f in files:
-            total += os.path.getsize(os.path.join(root, f))
-    return total
+def reset_live_cache():
+    global _live_cache
+    with _live_cache_lock:
+        _live_cache = None
 
 def update_live_json(cycle_uid=None, coil_id=None, defect_summary=None, results=None, status="processing"):
+    """
+    live.json = running summary + only the LAST N results, so write cost stays
+    constant. State is kept in memory (no disk read-back on every write) and
+    written atomically (temp file + os.replace) so the UI never sees a
+    half-written file. Full results live only in the final cycle JSON.
+    """
+    global _live_cache
     try:
-        data = {}
-        if os.path.exists(LIVE_JSON_PATH):
-            try:
-                with open(LIVE_JSON_PATH, "r") as f:
-                    data = json.load(f)
-            except Exception:
-                data = {}
+        with _live_cache_lock:
+            if _live_cache is None:
+                _live_cache = {
+                    "status": status,
+                    "cycle_uid": cycle_uid or "",
+                    "coil_length_mm": 12000000,
+                    "current_position_mm": 0,
+                    "speed_mpm": 0,
+                    "total_defects": 0,
+                    "total_frames": 0,
+                    "total_defective_frames": 0,
+                    "start_time": datetime.now().isoformat(),
+                    "last_updated": datetime.now().isoformat(),
+                    "result": []
+                }
 
-        # Default template
-        if not data:
-            data = {
-                "status": status,
-                "cycle_uid": cycle_uid or "",
-                "coil_length_mm": 12000000,
-                "current_position_mm": 0,
-                "speed_mpm": 0,
-                "total_defects": 0,
-                "total_frames": 0,
-                "total_defective_frames": 0,
-                "start_time": datetime.now().isoformat(),
-                "last_updated": datetime.now().isoformat(),
-                "result": []
-            }
+            data = _live_cache
+            data["status"] = status
+            if cycle_uid:
+                data["cycle_uid"] = cycle_uid
+            if coil_id:
+                data["coil_id"] = coil_id
 
-        # Update fields
-        data["status"] = status
-        if cycle_uid:
-            data["cycle_uid"] = cycle_uid
-        if coil_id:
-            data["coil_id"] = coil_id
+            if defect_summary:
+                data["current_position_mm"] = defect_summary.get("distance", data.get("current_position_mm", 0))
+                data["total_defects"] = defect_summary.get("total_defects", data.get("total_defects", 0))
+                data["total_frames"] = defect_summary.get("total_frames", data.get("total_frames", 0))
+                data["total_defective_frames"] = defect_summary.get("total_defective_frames", defect_summary.get("defect_frames", data.get("total_defective_frames", 0)))
 
-        if defect_summary:
-            data["current_position_mm"] = defect_summary.get("distance", data.get("distance", 0))
-            data["total_defects"] = defect_summary.get("total_defects", data.get("total_defects", 0))
-            data["total_frames"] = defect_summary.get("total_frames", data.get("total_frames", 0))
-            data["total_defective_frames"] = defect_summary.get("total_defective_frames", defect_summary.get("defect_frames", data.get("total_defective_frames", 0)))
+            if results is not None:
+                with result_lock:
+                    data["result"] = list(results[-LIVE_RESULTS_KEEP:])
 
-        if results is not None:
-            data["result"] = results
+            data["last_updated"] = datetime.now().isoformat()
 
-        data["last_updated"] = datetime.now().isoformat()
+            os.makedirs(os.path.dirname(LIVE_JSON_PATH), exist_ok=True)
 
-        os.makedirs(os.path.dirname(LIVE_JSON_PATH), exist_ok=True)
-        with open(LIVE_JSON_PATH, "w") as f:
-            json.dump(data, f, indent=4)
+            # atomic write: dump to temp file, then swap in
+            tmp_path = LIVE_JSON_PATH + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(data, f, separators=(",", ":"))
+            os.replace(tmp_path, LIVE_JSON_PATH)
 
     except Exception:
         logger.error(f"Failed to update live json: {traceback.format_exc()}")
 
+def _run_orphan_bg(cycle_uid, model_1, model_2, mq_obj):
+    """Background orphan recovery worker. Always releases its slot."""
+    try:
+        process_cycle(cycle_uid, model_1, model_2, mq_obj, bg_orphan=True)
+        logger.info(f"Orphan recovered: {cycle_uid}")
+    except Exception:
+        logger.critical(f"orphan recovery error ({cycle_uid}):\n{traceback.format_exc()}")
+    finally:
+        with _orphan_lock:
+            _active_orphans.discard(cycle_uid)
+
 def main():
- 
+
     model_1 = MASKRCNN(
         "taloja1",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
@@ -834,7 +875,7 @@ def main():
         False,
         GPU_ID=0
     )
- 
+
     model_2 = MASKRCNN(
         "taloja2",
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
@@ -845,16 +886,35 @@ def main():
         False,
         GPU_ID=0
     )
- 
+
+    # per-model inference locks: live + bg orphan threads can share models safely
+    model_1.infer_lock = Lock()
+    model_2.infer_lock = Lock()
+
     mq_obj = MQTT("capture_monitor")
     mq_obj.subscribe("taloja/capture")      # <-- receive TRIGGER start/stop
- 
+
     base = os.path.join(RAW_PATH, LOCATION)
- 
+
+    # background pool: up to ORPHAN_MAX orphan cycles recover in parallel
+    # while main stays free to accept a live START instantly
+    orphan_pool = ThreadPoolExecutor(max_workers=ORPHAN_MAX)
+
+    print("LOGIC service started, waiting for triggers...")
+    logger.info("LOGIC service started, waiting for triggers")
+
+    last_idle_pub = 0.0
+    last_orphan_check = 0.0
+
     while True:
-        mq_obj.publish("taloja/health", {"service": "LOGIC"})
-        mq_obj.publish("main/logic", {"roll_num": "--"})
- 
+        now_t = time.time()
+
+        # idle heartbeats: once per second is plenty (was: every 0.2s loop pass)
+        if now_t - last_idle_pub > 1.0:
+            mq_obj.publish("taloja/health", {"service": "LOGIC"})
+            mq_obj.publish("main/logic", {"roll_num": "--"})
+            last_idle_pub = now_t
+
         # ---- 1) Trigger-driven streaming (primary path) ----
         data = mq_obj.data
         if data and data.get("_consumed") is not True:
@@ -869,28 +929,32 @@ def main():
                 except Exception:
                     logger.critical(f"process_cycle_stream error:\n{traceback.format_exc()}")
                 continue
- 
-        # ---- 2) Restart/orphan recovery (batch, only when idle) ----
-        orphan = find_orphan_cycle(base, idle_secs=30)
-        if orphan:
-            print(f"Recovering orphan cycle: {orphan}")
-            logger.info(f"Recovering orphan cycle: {orphan}")
-            try:
-                process_cycle(orphan, model_1, model_2, mq_obj)
-            except Exception:
-                logger.critical(f"orphan recovery error:\n{traceback.format_exc()}")
-            continue
- 
-        print("WAITING FOR DATA")
+
+        # ---- 2) Orphan recovery: NON-BLOCKING, up to ORPHAN_MAX in background ----
+        # main never blocks on orphans, so a live START is always handled instantly
+        if now_t - last_orphan_check > 15.0:
+            last_orphan_check = now_t
+            with _orphan_lock:
+                free_slots = ORPHAN_MAX - len(_active_orphans)
+                busy = set(_active_orphans)
+            if free_slots > 0:
+                for uid in find_orphan_cycles(base, idle_secs=30, exclude=busy)[:free_slots]:
+                    with _orphan_lock:
+                        if uid in _active_orphans:
+                            continue
+                        _active_orphans.add(uid)
+                    print(f"Recovering orphan cycle in background: {uid}")
+                    logger.info(f"Recovering orphan cycle in background: {uid}")
+                    orphan_pool.submit(_run_orphan_bg, uid, model_1, model_2, mq_obj)
+
         time.sleep(0.2)
- 
- 
+
+
 if __name__ == "__main__":
     while True:
         try:
             main()
         except:
-            print("Error in main() !")
-            logger.critical(f"{traceback.format_exc()}")
-            print("Restarting in 5 secs")
+            logger.critical(f"main() crashed:\n{traceback.format_exc()}")
+            print("Error in main() ! Restarting in 5 secs")
             time.sleep(5)
