@@ -5,6 +5,8 @@ import shutil
 import time
 import traceback
 import pymysql
+import threading
+from queue import Queue, Full
 
 from datetime import datetime
 from collections import defaultdict
@@ -18,7 +20,7 @@ from DEPENDANT.LOGGING import initializeLogger
 LOCATION = "TALOJA"
 
 # /home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA /home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA
-BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/')
 
 MODEL_DIR = os.path.join(BASE_FILE_PATH, "DEBUGS", "MODEL")
 RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
@@ -45,6 +47,8 @@ DEBUG_IMG_INTERVAL = 2.0  # write <cam>_debug.jpg at most once per this many sec
 MQTT_UI_INTERVAL   = 1.0  # publish ui/logic + health at most once per this many secs
 SAVE_SCALE   = float(os.environ.get('SAVE_SCALE', '0.5'))  # stored trash copy is downscaled (inference stays full-size)
 SAVE_QUALITY = int(os.environ.get('SAVE_QUALITY', '60'))   # JPEG quality of stored trash copy
+SAVE_QUEUE_MAX = int(os.environ.get('SAVE_QUEUE_MAX', '128'))
+SAVE_WORKERS = int(os.environ.get('SAVE_WORKERS', '3'))
 
 # ---- background orphan recovery ----
 ORPHAN_MAX = 3            # up to this many orphan cycles recovered in parallel (background)
@@ -280,7 +284,7 @@ def process_labels(labels, img_shape):
         elif "WHITE_SPOT" == raw_cls:
             cls = "W"
         elif "SCORING" == raw_cls:
-            if score < 0.90:
+            if score < 0.95:
                 cls = "O"
             else:
                 cls = "S"
@@ -314,6 +318,80 @@ def process_labels(labels, img_shape):
 
     counts = {k: len(v) for k, v in defect_boxes.items()}
     return defect_boxes, counts
+
+
+def save_small_compressed_from_path(src_path, output_path, scale=SAVE_SCALE, quality=SAVE_QUALITY):
+    try:
+        if not os.path.exists(src_path):
+            return False
+        img = cv2.imread(src_path)
+        if img is None:
+            return False
+        return save_small_compressed(img, output_path, scale=scale, quality=quality)
+    except Exception:
+        logger.error(f"save_small_compressed_from_path failed for {src_path}: {traceback.format_exc()}")
+        return False
+
+
+class ImageSaver:
+    def __init__(self, workers=SAVE_WORKERS, queue_size=SAVE_QUEUE_MAX):
+        self.q = Queue(maxsize=queue_size)
+        self.workers = []
+        for _ in range(workers):
+            t = threading.Thread(target=self._worker, daemon=True)
+            t.start()
+            self.workers.append(t)
+
+    def enqueue(self, src_path, output_path, scale=SAVE_SCALE, quality=SAVE_QUALITY):
+        try:
+            self.q.put_nowait((src_path, output_path, scale, quality))
+        except Full:
+            try:
+                self.q.put((src_path, output_path, scale, quality), timeout=0.1)
+            except Full:
+                logger.warning(f"Save queue full, dropping save for {output_path}")
+
+    def _worker(self):
+        while True:
+            try:
+                src_path, output_path, scale, quality = self.q.get()
+                save_small_compressed_from_path(src_path, output_path, scale, quality)
+            except Exception:
+                logger.error(f"ImageSaver worker error: {traceback.format_exc()}")
+            finally:
+                try:
+                    self.q.task_done()
+                except Exception:
+                    pass
+
+
+# module-wide background saver
+image_saver = ImageSaver()
+
+
+def scale_defect_boxes(defect_boxes, orig_shape, scale):
+    if not scale or scale == 1.0:
+        return defect_boxes
+
+    orig_h, orig_w = orig_shape[:2]
+    new_w = int(round(orig_w * scale))
+    new_h = int(round(orig_h * scale))
+    scaled = defaultdict(list)
+
+    for cls, items in defect_boxes.items():
+        for item in items:
+            x1, x2, y1, y2 = item["b"]
+            scaled_item = item.copy()
+            scaled_item["b"] = [
+                max(0, min(new_w, int(round(x1 * scale)))),
+                max(0, min(new_w, int(round(x2 * scale)))),
+                max(0, min(new_h, int(round(y1 * scale)))),
+                max(0, min(new_h, int(round(y2 * scale))))
+            ]
+            scaled[cls].append(scaled_item)
+
+    return scaled
+
 
 def draw_boxes(img, defect_boxes):
 
@@ -410,7 +488,7 @@ def add_summary(img, counts, severity, distance):
 
     return img
 
-def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results, bg_orphan=False):
+def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial, defect_summary, mq_obj, results, bg_orphan=False, loader_executor=None, saver_executor=None):
     date_str = datetime.now().strftime('%Y%m%d')
     last_update = datetime.now()
     last_mq = 0.0
@@ -420,10 +498,15 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
         return results
 
     # loader: decodes the NEXT image from disk while the GPU runs the current one
-    # saver:  compresses + writes the small trash copy without blocking the GPU
-    loader = ThreadPoolExecutor(max_workers=1)
-    saver = ThreadPoolExecutor(max_workers=1)
-    next_future = loader.submit(cv2.imread, os.path.join(cam_path, items[0][1]))
+    local_loader = False
+    if loader_executor is None:
+        loader_executor = ThreadPoolExecutor(max_workers=2)
+        local_loader = True
+
+    save_dir = os.path.join(TRASH_PATH, cycle_uid, cam_serial)
+    os.makedirs(save_dir, exist_ok=True)
+
+    next_future = loader_executor.submit(cv2.imread, os.path.join(cam_path, items[0][1]))
 
     try:
         for i, (rank, image_name) in enumerate(items):
@@ -439,7 +522,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
 
                 # prefetch the next image immediately
                 if i + 1 < len(items):
-                    next_future = loader.submit(
+                    next_future = loader_executor.submit(
                         cv2.imread, os.path.join(cam_path, items[i + 1][1])
                     )
                 else:
@@ -464,6 +547,12 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                 boxes, counts = process_labels(labels, img.shape)
                 total = sum(counts.values())
                 severity = calculate_severity(total)
+
+                scaled_boxes = scale_defect_boxes(boxes, img.shape, SAVE_SCALE)
+                compressed_shape = (
+                    int(round(img.shape[0] * SAVE_SCALE)) if SAVE_SCALE and SAVE_SCALE != 1.0 else img.shape[0],
+                    int(round(img.shape[1] * SAVE_SCALE)) if SAVE_SCALE and SAVE_SCALE != 1.0 else img.shape[1]
+                )
 
                 # ---- counters under lock, publish OUTSIDE the lock ----
                 with summary_lock:
@@ -491,13 +580,13 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                     last_mq = now_t
 
                 # ---- TRASH: small compressed copy, saved in background ----
-                save_dir = os.path.join(TRASH_PATH, cycle_uid, cam_serial)
                 save_path = os.path.join(save_dir, image_name)
-                saver.submit(save_small_compressed, img, save_path)
+                # enqueue a path-based save task (worker will read + compress)
+                image_saver.enqueue(img_path, save_path)
 
                 # ---- TEMP debug jpg: at most once per DEBUG_IMG_INTERVAL per camera ----
                 # bg orphans never touch the debug preview (it belongs to the live cycle)
-                write_debug = False
+                write_debug = True
                 if not bg_orphan:
                     with debug_lock:
                         if (now_t - _last_debug_write.get(cam_serial, 0.0)) > DEBUG_IMG_INTERVAL:
@@ -518,10 +607,13 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                     "e": eg_setpoint,
                     "l": distance,
                     "s": severity,
-                    **boxes,
+                    **scaled_boxes,
                     "t": counts,
                     "img": save_path,
                     "raw_img": save_path,
+                    "compressed_width": compressed_shape[1],
+                    "compressed_height": compressed_shape[0],
+                    "scale": SAVE_SCALE,
                 }
 
                 with result_lock:
@@ -541,8 +633,8 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                 logger.error(f"Error processing {image_name}: {traceback.format_exc()}")
 
     finally:
-        loader.shutdown(wait=False)
-        saver.shutdown(wait=True)   # ensure all trash copies are on disk before finalize
+        if local_loader:
+            loader_executor.shutdown(wait=False)
 
     return results
 
@@ -575,21 +667,27 @@ def process_cycle(cycle_uid, model_1, model_2, mq_obj, bg_orphan=False):
     if not bg_orphan:
         reset_live_cache()
 
-    for cam_serial in os.listdir(base_path):
-        cam_path = os.path.join(base_path, cam_serial)
-        image_list = get_sorted_images(cam_path)
+    loader_executor = ThreadPoolExecutor(max_workers=4)
+    saver_executor = ThreadPoolExecutor(max_workers=6)
+    try:
+        for cam_serial in os.listdir(base_path):
+            cam_path = os.path.join(base_path, cam_serial)
+            image_list = get_sorted_images(cam_path)
 
-        # Split into two halves, preserving original rank (1-based)
-        ranked_images = list(enumerate(image_list, start=1))
-        first_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 1]
-        second_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 0]
+            # Split into two halves, preserving original rank (1-based)
+            ranked_images = list(enumerate(image_list, start=1))
+            first_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 1]
+            second_half = [(rank, img) for rank, img in ranked_images if rank % 2 == 0]
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(process_images, cycle_uid, coil_id, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results, bg_orphan)
-            future_2 = executor.submit(process_images, cycle_uid, coil_id, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results, bg_orphan)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_1 = executor.submit(process_images, cycle_uid, coil_id, cam_path, first_half,  model_1, cam_serial, defect_summary, mq_obj, results, bg_orphan, loader_executor, saver_executor)
+                future_2 = executor.submit(process_images, cycle_uid, coil_id, cam_path, second_half, model_2, cam_serial, defect_summary, mq_obj, results, bg_orphan, loader_executor, saver_executor)
 
-            future_1.result()
-            future_2.result()
+                future_1.result()
+                future_2.result()
+    finally:
+        loader_executor.shutdown(wait=False)
+        saver_executor.shutdown(wait=True)
 
     print(f"Cycle Done: {cycle_uid}")
     logger.info(f"Cycle Done: {cycle_uid}")
@@ -678,6 +776,8 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
 
     # ONE persistent worker pool for the whole cycle (was: new pool per batch)
     executor = ThreadPoolExecutor(max_workers=2)
+    loader_executor = ThreadPoolExecutor(max_workers=4)
+    saver_executor = ThreadPoolExecutor(max_workers=6)
 
     LIVE_ACTIVE.set()   # bg orphan workers slow down while this is set
     try:
@@ -732,10 +832,12 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
 
                     f1 = executor.submit(process_images, cycle_uid, coil_id, cam_path,
                                          first_half,  model_1, cam_serial,
-                                         defect_summary, mq_obj, results)
+                                         defect_summary, mq_obj, results,
+                                         False, loader_executor, saver_executor)
                     f2 = executor.submit(process_images, cycle_uid, coil_id, cam_path,
                                          second_half, model_2, cam_serial,
-                                         defect_summary, mq_obj, results)
+                                         defect_summary, mq_obj, results,
+                                         False, loader_executor, saver_executor)
                     f1.result()
                     f2.result()
 
@@ -745,8 +847,7 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
             # ---- 3) Keep live.json fresh during the run ----
             if (datetime.now() - last_live).total_seconds() > LIVE_JSON_INTERVAL:
                 try:
-                    update_live_json(cycle_uid, coil_id, defect_summary,
-                                     results=results, status="inprogress")
+                    update_live_json(cycle_uid, coil_id, defect_summary, results=results, status="inprogress")
                 except Exception:
                     pass
                 last_live = datetime.now()
@@ -760,6 +861,8 @@ def process_cycle_stream(cycle_uid, model_1, model_2, mq_obj):
     finally:
         LIVE_ACTIVE.clear()
         executor.shutdown(wait=True)
+        loader_executor.shutdown(wait=False)
+        saver_executor.shutdown(wait=True)
 
     # ================= FINALIZE (only reached after STOP) =================
     print(f"Cycle Done (stream): {cycle_uid}")
@@ -949,12 +1052,18 @@ def main():
 
         time.sleep(0.2)
 
-
 if __name__ == "__main__":
-    while True:
-        try:
-            main()
-        except:
-            logger.critical(f"main() crashed:\n{traceback.format_exc()}")
-            print("Error in main() ! Restarting in 5 secs")
-            time.sleep(5)
+
+    # while True:
+    #     try: main()
+    #     except:
+    #         logger.critical(f"main() crashed:\n{traceback.format_exc()}")
+    #         print("Error in main() ! Restarting in 5 secs")
+    #         time.sleep(5)
+
+    
+    import cProfile
+    import pstats
+
+    # Profile and save to a file
+    cProfile.run("main()", "/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/DEBUGS/LOGIC.prof")

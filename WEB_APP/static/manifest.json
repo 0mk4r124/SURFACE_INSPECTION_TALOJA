@@ -1,0 +1,11 @@
+{
+  "name": "Drishti Portal - Surface Inspection Taloja",
+  "short_name": "Drishti SI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#fdf50d",
+  "icons": [
+    { "src": "/static/logo/hindalco.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}

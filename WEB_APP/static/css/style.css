@@ -104,11 +104,11 @@ body {
     margin-top: 10px;
 }
 
-#imageModal .modal-content {
+/* #imageModal .modal-content {
     max-height: 95vh;
     display: flex;
     flex-direction: column;
-}
+} */
 
 #imageModal .modal-header,
 #imageModal .modal-footer {
@@ -126,19 +126,42 @@ body {
     border-radius: 0 0 6px 6px;
 }
 
-#imageModal img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    border-radius: 4px;    /* subtle look */
-}
-
+/* definite height chain so the image can size and centre correctly */
 #imageModal .modal-content {
+    height: 92vh;          /* was max-height only -> % heights below never resolved */
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
     box-shadow: 0 0 20px rgba(0,0,0,0.45);
 }
 
+#imageModal .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;         /* let the flex child shrink instead of overflowing */
+    overflow: hidden;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 0 0 6px 6px;
+    /* display:flex / justify-content / align-items no longer needed here */
+}
 
+#imageModal #zoomWrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 
+#imageModal #modalImage {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    margin: auto;          /* centres it even when JS sets display:block */
+    border-radius: 4px;
+}
+
+/* #imageModal .modal-content {
+    box-shadow: 0 0 20px rgba(0,0,0,0.45);
+} */
 
 /* Add these styles to your existing style.css */
 

@@ -71,6 +71,7 @@ document.getElementById("imageModal").addEventListener("shown.bs.modal", functio
         imageLoader.style.display = "none";
         modalImg.style.display = "block";
         isImageLoading = false;
+        resetZoomAndPosition(); 
     };
     modalImg.onerror = function () {
         imageLoader.style.display = "none";
@@ -96,7 +97,7 @@ zoomWrapper.addEventListener("mousedown", (e) => {
     startY = e.clientY - imgY;
 });
 zoomWrapper.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
+    if (!isDragging || scale <= 1) return;    // <-- add scale check
     imgX = e.clientX - startX;
     imgY = e.clientY - startY;
     modalImg.style.transform = `translate(${imgX}px, ${imgY}px) scale(${scale})`;
@@ -111,10 +112,19 @@ zoomWrapper.addEventListener("mouseleave", () => {
 
 // Clean up when modal is hidden
 document.getElementById("imageModal").addEventListener("hidden.bs.modal", function () {
+    // detach FIRST so clearing src cannot trigger a stale onerror
+    modalImg.onload = null;
+    modalImg.onerror = null;
+
     if (modalImg.src && modalImg.src.startsWith("blob:")) {
         URL.revokeObjectURL(modalImg.src);
     }
-    modalImg.src = "";
+    if (this.dataset.src && this.dataset.src.startsWith("blob:")) {
+        URL.revokeObjectURL(this.dataset.src);
+    }
+    this.dataset.src = "";
+
+    modalImg.removeAttribute("src");   // no page-URL refetch, no error event
     modalImg.style.display = "none";
     imageLoader.style.display = "none";
     modalOpen = false;
@@ -126,6 +136,11 @@ function openImageModal(imgUrl, title) {
     const modalEl = document.getElementById("imageModal");
     if (!modalEl) return;
     if (title) document.getElementById("vehicle_number").innerHTML = title;
+
+    const prev = modalEl.dataset.src;
+    if (prev && prev !== imgUrl && prev.startsWith("blob:")) {
+        URL.revokeObjectURL(prev);
+    }
     modalEl.dataset.src = imgUrl || "";
 
     if (!modalOpen) {
