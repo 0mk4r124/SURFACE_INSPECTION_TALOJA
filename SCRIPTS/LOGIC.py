@@ -586,7 +586,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
 
                 # ---- TEMP debug jpg: at most once per DEBUG_IMG_INTERVAL per camera ----
                 # bg orphans never touch the debug preview (it belongs to the live cycle)
-                write_debug = True
+                write_debug = False
                 if not bg_orphan:
                     with debug_lock:
                         if (now_t - _last_debug_write.get(cam_serial, 0.0)) > DEBUG_IMG_INTERVAL:
