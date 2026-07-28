@@ -98,10 +98,11 @@ def main():
                ironing_raised = plcobj.read_bit(1, f"{FRAME_CAPTURE_SIGNAL}[10]")
 
                if ((mill_run == 1) or (mill_run == '1')) and diameter > 570:
-                    roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
-                    mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     conn = getDBconn()
                     coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
+                    if not (("STCS" in coil_id) or ("STCL" in coil_id)): continue
+                    roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
+                    mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()}")
                     logger.info(f"Trigger recieved - {roll_num} - {coil_id}")
                     time.sleep(2)
