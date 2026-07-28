@@ -339,6 +339,16 @@ class CoilMap {
                     }
                 });
         });
+
+        // --- NEW: fallback when 'l' (distance) is missing/flat for the whole roll ---
+        if (this.defects.length > 0) {
+            const lens = this.defects.map(d => d.length);
+            const flat = Math.min(...lens) === Math.max(...lens);
+            if (flat) {
+                this.defects.forEach(d => { d.length = d.frame || 0; }); // use frame rank instead
+            }
+        }
+
         if (this.defects.length === 0) {
             this.minLen = 0;
             this.maxLen = 1;

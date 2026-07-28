@@ -4,6 +4,7 @@ import json
 import os
 import traceback
 import torch
+# import time
 
 import numpy as np
 
@@ -48,6 +49,7 @@ class MASKRCNN:
     def register_modeldatasets(self):
         try:
             tag = self.tag
+            torch.backends.cudnn.benchmark = True
             torch.cuda.set_device(self.GPU_ID)
             self.labelMap = self.__loadLablMap__()
             self.class_array = np.array(list(self.labelMap.values()))
@@ -56,7 +58,7 @@ class MASKRCNN:
 
             self.metadata = MetadataCatalog.get(tag)
             cfg = get_cfg()
-            cfg.TEST.DETECTIONS_PER_IMAGE = 500
+            cfg.TEST.DETECTIONS_PER_IMAGE = 20
             cfg.merge_from_file(self.mrcnn_config_fl)
             if self.debugMode: cfg.merge_from_list(["MODEL.DEVICE", "cpu"])
             else: cfg.MODEL.DEVICE = f"cuda:{self.GPU_ID}"
@@ -81,41 +83,49 @@ class MASKRCNN:
         labellist = []
 
         try:
-            output = self.predictor(img)       
-            
-            boxes_surface = output["instances"].pred_boxes.tensor.to("cpu").numpy()
-            pred_class_surface = output["instances"].pred_classes.to("cpu").numpy()
-            scores_surface = output["instances"].scores.to("cpu").numpy()
-            np.random.seed(100)
-            COLORS = np.random.randint(150, 200, size=(200, 3),dtype="uint8")
+            with torch.inference_mode():
 
-            ys = boxes_surface[:, 1].astype(int)
-            xs = boxes_surface[:, 0].astype(int)
-            ye = boxes_surface[:, 3].astype(int)
-            xe = boxes_surface[:, 2].astype(int)
+                # torch.cuda.synchronize()
+                # t0 = time.perf_counter()
+                output = self.predictor(img)
+                # torch.cuda.synchronize()
+                # print((time.perf_counter()-t0)*1000)
+                
+                instances = output["instances"].to("cpu")
 
-            # centroid
-            cx = ((xs + xe) * 0.5).astype(int)
-            cy = ((ys + ye) * 0.5).astype(int)
+                boxes = instances.pred_boxes.tensor.numpy()
+                classes = instances.pred_classes.numpy()
+                scores = instances.scores.numpy()
 
-            # widths and heights
-            wh = np.stack([(xe - xs), (ye - ys)], axis=1).tolist()
+                ys = boxes[:, 1].astype(int)
+                xs = boxes[:, 0].astype(int)
+                ye = boxes[:, 3].astype(int)
+                xe = boxes[:, 2].astype(int)
 
-            # Map class IDs to class names once
-            class_names = self.class_array[pred_class_surface]
+                # centroid
+                cx = ((xs + xe) * 0.5).astype(int)
+                cy = ((ys + ye) * 0.5).astype(int)
 
-            labellist = list(zip(
-                scores_surface,
-                ys, ye, xs, xe,
-                class_names,
-                cy, cx,
-                wh
-            ))
+                # widths and heights
+                wh = np.stack([(xe - xs), (ye - ys)], axis=1).tolist()
 
-            # if self.debugMode is True:
-            # visualizer = Visualizer(img[:, :, ::-1], metadata=self.metadata, scale=1, instance_mode=ColorMode.IMAGE)
-            # img = visualizer.draw_instance_predictions(output["instances"].to("cpu"))
-            # img = np.array(img.get_image()[:, :, ::-1])
+                # Map class IDs to class names once
+                class_names = self.class_array[classes]
+
+                labellist = list(zip(
+                    scores,
+                    ys, ye, xs, xe,
+                    class_names,
+                    cy, cx,
+                    wh
+                ))
+
+                # np.random.seed(100)
+                # COLORS = np.random.randint(150, 200, size=(200, 3),dtype="uint8")
+                # if self.debugMode is True:
+                # visualizer = Visualizer(img[:, :, ::-1], metadata=self.metadata, scale=1, instance_mode=ColorMode.IMAGE)
+                # img = visualizer.draw_instance_predictions(output["instances"].to("cpu"))
+                # img = np.array(img.get_image()[:, :, ::-1])
 
         except Exception as e:
             print(f"run_inference() Exception is : {e}")
