@@ -1307,10 +1307,10 @@ def _build_model(tag):
     return MASKRCNN(
         tag,
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_4JULY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_30JULY"),
         "model_final.pth",
         0.60,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_4JULY/TALOJA_MODEL_4JULY.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_30JULY/TALOJA_MODEL_30JULY.json"),
         False,
         GPU_ID=0
     )

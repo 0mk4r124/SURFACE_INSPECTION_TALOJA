@@ -98,10 +98,13 @@ def main():
                ironing_raised = plcobj.read_bit(1, f"{FRAME_CAPTURE_SIGNAL}[10]")
 
                if ((mill_run == 1) or (mill_run == '1')) and diameter > 570:
+                    roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
                     conn = getDBconn()
                     coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
-                    if not (("STCS" in coil_id) or ("STCL" in coil_id)): continue
-                    roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
+                    if not (("STCS" in coil_id) or ("STCL" in coil_id)): 
+                         print(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL")    
+                         logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL")        
+                         continue
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()}")
                     logger.info(f"Trigger recieved - {roll_num} - {coil_id}")
@@ -141,7 +144,7 @@ def main():
 
                # logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                # logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
-               print(f"diameter = {diameter} | mill_run = {mill_run} | ironing_raised = {ironing_raised}")
+               print(f"diameter = {diameter} | mill_run = {mill_run} | ironing_raised = {ironing_raised} - {datetime.now()}")
                mq_obj.publish("taloja/health", {"service": "TRIGGER"})
                time.sleep(2)
 
