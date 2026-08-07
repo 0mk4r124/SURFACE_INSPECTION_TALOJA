@@ -663,6 +663,7 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
     load_wait_acc = 0.0
     stats_window_start = t_thread_start
     stats_window_frames = 0
+    debug_counter = 0
 
     # loader: decodes the NEXT image from disk while the GPU runs the current one
     local_loader = False
@@ -780,13 +781,15 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
 
                 # ---- TEMP debug jpg: at most once per DEBUG_IMG_INTERVAL per camera ----
                 # bg orphans never touch the debug preview (it belongs to the live cycle)
-                write_debug = False
+                write_debug = True
+                debug_counter += 1
                 if not bg_orphan:
                     with debug_lock:
                         if (now_t - _last_debug_write.get(cam_serial, 0.0)) > DEBUG_IMG_INTERVAL:
                             _last_debug_write[cam_serial] = now_t
                             write_debug = True
-                if write_debug:
+                if write_debug and debug_counter>50:
+                    debug_counter = 0 
                     annotated = draw_boxes(img.copy(), boxes)
                     annotated = add_summary(annotated, counts, severity, distance)
                     cv2.imwrite(
