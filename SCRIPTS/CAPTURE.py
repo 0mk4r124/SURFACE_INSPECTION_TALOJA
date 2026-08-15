@@ -16,8 +16,9 @@ from DEPENDANT.LOGGING import initializeLogger
 LOCATION = "TALOJA"
 CAMERA_CONFIGS = {
     "24521939": {
-        "EXPOSURE": 2000.0,
-        "FRAME_RATE": 122.0,
+        "EXPOSURE": 300.0,
+        "FRAME_RATE": 70.0,
+        "PIXEL_FORMAT": "BayerRG8",
         "PACKET_SIZE": 7000,
         "PACKET_DELAY": 10,
         "THROUGHPUT": 700000000,
@@ -27,7 +28,7 @@ CAMERA_CONFIGS = {
 BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
 
 TEMP_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TEMP_IMG")
-RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
+RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "TEST")
 LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
 
 # Database configuration
@@ -128,7 +129,8 @@ def process_capture(flir, mq_obj, logger):
     while True:
         try:
 
-            data = mq_obj.data
+            # data = mq_obj.data # Live model data
+            data = {"action": "start", "roll_num": "TEST_ROLL_001", "diameter": 570, "mill_speed": 0, "eg_setpoint": 0, "width": 0, "length": 0} # Live data collection
             mq_obj.publish("taloja/health", {"service": "CAPTURE"})
 
             if data and data.get("_consumed") is not True:

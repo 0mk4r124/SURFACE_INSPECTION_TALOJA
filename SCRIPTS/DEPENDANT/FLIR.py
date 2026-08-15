@@ -215,13 +215,24 @@ class FlirCamera:
             except Exception as e:
                 print(f"Frame rate setup failed: {e}")
 
-            # --- Pixel format safe default ---
+            # --- Pixel format (configurable, default BayerRG8) ---
             try:
                 PixelFormat = PySpin.CEnumerationPtr(camNodeMap.GetNode("PixelFormat"))
                 if PySpin.IsAvailable(PixelFormat) and PySpin.IsWritable(PixelFormat):
-                    PixelFormat.SetIntValue(PixelFormat.GetEntryByName("BayerRG8").GetValue())
-            except Exception:
-                pass
+                    fmt_name = str(cfg.get("PIXEL_FORMAT", "BayerRG8"))
+                    entry = PySpin.CEnumEntryPtr(PixelFormat.GetEntryByName(fmt_name))
+                    if PySpin.IsAvailable(entry) and PySpin.IsReadable(entry):
+                        PixelFormat.SetIntValue(entry.GetValue())
+                        print(f"PixelFormat set to {fmt_name}")
+                    else:
+                        supported = [
+                            PySpin.CEnumEntryPtr(e).GetSymbolic()
+                            for e in PixelFormat.GetEntries()
+                            if PySpin.IsReadable(PySpin.CEnumEntryPtr(e))
+                        ]
+                        print(f"PixelFormat '{fmt_name}' not available. Supported: {supported}")
+            except Exception as e:
+                print(f"PixelFormat setup failed: {e}")
 
             # Disable packet resend & Disable auto exposure
             # try:
@@ -299,10 +310,13 @@ class FlirCamera:
             return False
         
     def converter(self, image_result):
+        pf = image_result.GetPixelFormat()
+        if pf == PySpin.PixelFormat_Mono8:
+            return image_result.GetNDArray().copy()
+        if pf == PySpin.PixelFormat_BayerRG8:
+            return cv2.cvtColor(image_result.GetNDArray(), cv2.COLOR_BayerRG2GRAY)
         converted = self.processor.Convert(image_result, PySpin.PixelFormat_BGR8)
-        img = converted.GetNDArray()
-
-        return img
+        return converted.GetNDArray()
 
     def capture(self, cam, timeout_ms: int = 5000, save_path: str = None):
         """
