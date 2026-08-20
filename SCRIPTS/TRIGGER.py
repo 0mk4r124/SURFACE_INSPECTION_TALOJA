@@ -102,7 +102,7 @@ def main():
                     conn = getDBconn()
                     coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
                     if not (("STCS" in coil_id) or ("STCL" in coil_id)): 
-                         print(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL")    
+                         print(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL | mill_speed = {mill_speed}")    
                          logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL")        
                          continue
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
@@ -144,7 +144,7 @@ def main():
 
                # logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                # logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
-               print(f"diameter = {diameter} | mill_run = {mill_run} | ironing_raised = {ironing_raised} - {datetime.now()}")
+               print(f"diameter = {diameter} | mill_run = {mill_run}| mill_speed = {mill_speed} | ironing_raised = {ironing_raised} - {datetime.now()}")
                mq_obj.publish("taloja/health", {"service": "TRIGGER"})
                time.sleep(2)
 
