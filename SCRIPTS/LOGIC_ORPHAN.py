@@ -37,18 +37,17 @@ import LOGIC as L                      # reuse ALL existing logic, unchanged
 
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
-from DEPENDANT.CYCLE_CLAIM import (touch_claim, release_claim,
-                                   claimed_uids, cleanup_stale_claims)
+from DEPENDANT.CYCLE_CLAIM import (touch_claim, release_claim, claimed_uids, cleanup_stale_claims)
 
 logger = initializeLogger("LOGIC_ORPHAN", LOGS_PATH=L.LOGS_PATH)
 
 # Orphan cycles recovered in parallel (2 models -> 2 concurrent cycles,
 # shared safely through each model's infer_lock + least-busy allocation,
 # exactly like the existing orphan pool behavior).
-ORPHAN_MAX = int(os.environ.get('ORPHAN_MAX', '2'))
-ORPHAN_IDLE_SECS = float(os.environ.get('ORPHAN_IDLE_SECS', '30'))
-ORPHAN_SCAN_INTERVAL = float(os.environ.get('ORPHAN_SCAN_INTERVAL', '15'))
-
+ORPHAN_MAX = int(os.environ.get('ORPHAN_MAX', '3'))
+ORPHAN_NUM_MODELS = int(os.environ.get('ORPHAN_NUM_MODELS', '6'))
+ORPHAN_IDLE_SECS = float(os.environ.get('ORPHAN_IDLE_SECS', '5'))
+ORPHAN_SCAN_INTERVAL = float(os.environ.get('ORPHAN_SCAN_INTERVAL', '60'))
 
 def _run_orphan(cycle_uid, orphan_alloc, mq_obj):
     """Claim wrapper around the existing LOGIC._run_orphan_bg worker.
@@ -64,9 +63,23 @@ def _run_orphan(cycle_uid, orphan_alloc, mq_obj):
 def main():
 
     # ---- 2 models DEDICATED to orphan recovery ----
-    model_3 = L._build_model("taloja3")
-    model_4 = L._build_model("taloja4")
-    orphan_models = [model_3, model_4]
+    # model_3 = L._build_model("taloja3")
+    # model_4 = L._build_model("taloja4")
+    # orphan_models = [model_3, model_4]
+
+    orphan_models = []
+    for i in range(3, 3 + ORPHAN_NUM_MODELS):
+        try:
+            m = L._build_model(f"taloja{i}")
+            orphan_models.append(m)
+            logger.info(f"Loaded orphan model taloja{i}")
+        except Exception:
+            logger.error(f"Could not load taloja{i} (likely GPU memory): {traceback.format_exc()}")
+            break
+    if not orphan_models:
+        raise RuntimeError("No orphan models could be loaded")
+
+
     for m in orphan_models:
         m.infer_lock = Lock()
         m.use_amp = L.INFER_FP16

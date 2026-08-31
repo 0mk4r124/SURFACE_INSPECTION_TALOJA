@@ -14,6 +14,25 @@ from detectron2.data import MetadataCatalog
 from detectron2.engine import DefaultPredictor
 from detectron2.utils.visualizer import Visualizer, ColorMode
 
+# =========================================================================
+# White-spot polygon pass-through
+# -------------------------------------------------------------------------
+# For classes listed here, the segmentation mask is converted to a compact
+# contour polygon (full-frame coordinates) and appended as element [9] of
+# each label tuple. Everything else in the tuple keeps its position
+# (indices 0-8 are unchanged), so existing consumers are unaffected.
+#
+# The mask is cropped to the detection box in torch BEFORE the numpy
+# conversion, so the per-instance cost is tiny.
+# =========================================================================
+WS_MASK_PASSTHROUGH = os.environ.get("WS_MASK_PASSTHROUGH", "1") == "1"
+WS_SHAPE_CLASSES = {
+    c.strip().upper()
+    for c in os.environ.get("WS_SHAPE_CLASSES", "WHITE_SPOT").split(",")
+    if c.strip()
+}
+
+
 class MASKRCNN:
 
     def __init__(self, tag, CONFIG_PATH, mask_model_path, model_file, thr_acc, class_json, debugMode=False, GPU_ID=0):
@@ -78,20 +97,70 @@ class MASKRCNN:
         cx = int((xmin + xmax) / 2.0)
         cy = int((ymin + ymax) / 2.0)
         return (cx, cy)
-    
+
+    def _extract_polys(self, instances, class_names, xs, xe, ys, ye, img_shape):
+        """Contour polygons (full-frame coords) for shape-analysed classes only.
+        Returns a list aligned with the detections; None where not applicable."""
+        n = len(class_names)
+        polys = [None] * n
+
+        if not (WS_MASK_PASSTHROUGH and n and instances.has("pred_masks")):
+            return polys
+
+        want = [
+            i for i, c in enumerate(class_names)
+            if str(c).upper() in WS_SHAPE_CLASSES
+        ]
+        if not want:
+            return polys
+
+        H, W = img_shape[:2]
+
+        for i in want:
+            try:
+                x1 = max(0, int(xs[i])); x2 = min(W - 1, int(xe[i]))
+                y1 = max(0, int(ys[i])); y2 = min(H - 1, int(ye[i]))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                # crop in torch first -> tiny numpy array
+                sub = instances.pred_masks[i, y1:y2 + 1, x1:x2 + 1]
+                sub = sub.numpy().astype(np.uint8)
+
+                cnts, _ = cv2.findContours(
+                    sub, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                if not cnts:
+                    continue
+
+                c = max(cnts, key=cv2.contourArea)
+                c[:, :, 0] += x1          # back to full-frame coords
+                c[:, :, 1] += y1
+                polys[i] = c.reshape(-1, 2).tolist()
+
+            except Exception:
+                polys[i] = None
+
+        return polys
+
     def run_inference(self, img):
         labellist = []
 
         try:
             with torch.inference_mode():
+                use_amp = getattr(self, "use_amp", False)
+                with torch.inference_mode():
+                    with torch.autocast("cuda", dtype=torch.float16, enabled=use_amp):
+                        output = self.predictor(img)
+                    instances = output["instances"].to("cpu")
 
                 # torch.cuda.synchronize()
                 # t0 = time.perf_counter()
-                output = self.predictor(img)
+                # output = self.predictor(img)
                 # torch.cuda.synchronize()
                 # print((time.perf_counter()-t0)*1000)
                 
-                instances = output["instances"].to("cpu")
+                # instances = output["instances"].to("cpu")
 
                 boxes = instances.pred_boxes.tensor.numpy()
                 classes = instances.pred_classes.numpy()
@@ -112,12 +181,18 @@ class MASKRCNN:
                 # Map class IDs to class names once
                 class_names = self.class_array[classes]
 
+                # ---- polygon extraction: ONLY for shape-analysed classes ----
+                polys = self._extract_polys(
+                    instances, class_names, xs, xe, ys, ye, img.shape
+                )
+
                 labellist = list(zip(
                     scores,
                     ys, ye, xs, xe,
                     class_names,
                     cy, cx,
-                    wh
+                    wh,
+                    polys          # index 9 (None for non-shape classes)
                 ))
 
                 # np.random.seed(100)

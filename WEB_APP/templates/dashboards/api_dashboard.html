@@ -301,26 +301,50 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="vehicle_number"></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <span class="badge bg-secondary ms-3" id="defectNavCounter" style="display:none;">0 / 0</span>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body text-center">
-                <div id="zoomWrapper" class="position-relative" style="overflow:hidden; width:100%; height:100%; cursor:grab;">
-                    <div id="imageLoader"
-                        class="position-absolute top-50 start-50 translate-middle text-center"
-                        style="display:none; z-index:9999;">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
+
+            <div class="modal-body">
+                <div class="im-split">
+
+                    <!-- LEFT: image + nav arrows -->
+                    <div class="im-image-col">
+                        <button type="button" class="im-nav-btn im-nav-prev" id="defectPrevBtn"
+                                title="Previous defect (Left Arrow)" style="display:none;">&#10094;</button>
+                        <button type="button" class="im-nav-btn im-nav-next" id="defectNextBtn"
+                                title="Next defect (Right Arrow)" style="display:none;">&#10095;</button>
+
+                        <div id="zoomWrapper" class="position-relative"
+                             style="overflow:hidden; width:100%; height:100%; cursor:grab;">
+                            <div id="imageLoader"
+                                class="position-absolute top-50 start-50 translate-middle text-center"
+                                style="display:none; z-index:9999;">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <div class="mt-2">Loading image...</div>
+                            </div>
+                            <img id="modalImage" src=""
+                                style="user-select:none; -webkit-user-drag:none; transform-origin:center center;">
                         </div>
-                        <div class="mt-2">Loading image...</div>
                     </div>
-                    <img id="modalImage" src=""
-                        style="user-select:none; -webkit-user-drag:none; transform-origin:center center;">
+
+                    <!-- RIGHT: defect details -->
+                    <div class="im-details-col" id="defectDetailsPanel" style="display:none;">
+                        <div class="im-details-title">DEFECT DETAILS</div>
+                        <div class="im-details-body" id="defectDetailsBody"></div>
+                    </div>
+
                 </div>
             </div>
+
             <div class="modal-footer">
                 <div class="d-flex align-items-center w-100 justify-content-start">
-                    <p class="m-2 text-primary" id="updateImageBtn"><strong>Note :</strong> Use scroll to zoom in and zoom out.</p>
-         
+                    <p class="m-2 text-primary" id="updateImageBtn">
+                        <strong>Note :</strong> Scroll to zoom. Arrow keys / side buttons to move between defects.
+                        Left-click = previous, right-click = next.
+                    </p>
                 </div>
             </div>
         </div>
@@ -329,7 +353,7 @@
 
 <!-- Run Details Modal -->
 <div class="modal fade" id="runDetailsModal" tabindex="-1" aria-hidden="true" style="z-index:9990;">
-    <div class="modal-dialog modal-xl modal-dialog-centered modal-fullscreen-lg-down">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-fullscreen-lg-down">
         <div class="modal-content rd-modal-content">
 
             <div class="modal-header rd-modal-header">
