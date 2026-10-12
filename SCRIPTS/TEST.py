@@ -244,191 +244,195 @@
 
 
 
-import argparse
-import json
-import os
-from pathlib import Path
+# import argparse
+# import json
+# import os
+# from pathlib import Path
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Rescale defect box coordinates in RESULT JSON files to match compressed image dimensions."
-    )
-    parser.add_argument(
-        "root",
-        nargs="?",
-        default="DEBUGS/RESULT",
-        help="Root folder containing cycle RESULT JSON files (default: DEBUGS/RESULT).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Only print what would change, do not write files.",
-    )
-    parser.add_argument(
-        "--backup",
-        action="store_true",
-        help="Create a .bak copy before modifying each file.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force rescaling even if boxes already fit within compressed dimensions.",
-    )
-    return parser.parse_args()
+# def parse_args():
+#     parser = argparse.ArgumentParser(
+#         description="Rescale defect box coordinates in RESULT JSON files to match compressed image dimensions."
+#     )
+#     parser.add_argument(
+#         "root",
+#         nargs="?",
+#         default="DEBUGS/RESULT",
+#         help="Root folder containing cycle RESULT JSON files (default: DEBUGS/RESULT).",
+#     )
+#     parser.add_argument(
+#         "--dry-run",
+#         action="store_true",
+#         help="Only print what would change, do not write files.",
+#     )
+#     parser.add_argument(
+#         "--backup",
+#         action="store_true",
+#         help="Create a .bak copy before modifying each file.",
+#     )
+#     parser.add_argument(
+#         "--force",
+#         action="store_true",
+#         help="Force rescaling even if boxes already fit within compressed dimensions.",
+#     )
+#     return parser.parse_args()
 
 
-def is_box_object(value):
-    if not isinstance(value, dict):
-        return False
-    if "b" not in value or not isinstance(value["b"], list):
-        return False
-    if len(value["b"]) != 4:
-        return False
-    return all(isinstance(v, (int, float)) for v in value["b"])
+# def is_box_object(value):
+#     if not isinstance(value, dict):
+#         return False
+#     if "b" not in value or not isinstance(value["b"], list):
+#         return False
+#     if len(value["b"]) != 4:
+#         return False
+#     return all(isinstance(v, (int, float)) for v in value["b"])
 
 
-def rescale_coords(coords, scale, max_width=None, max_height=None):
-    x1, x2, y1, y2 = coords
-    scaled = [
-        int(round(x1 * scale)),
-        int(round(x2 * scale)),
-        int(round(y1 * scale)),
-        int(round(y2 * scale)),
-    ]
-    if max_width is not None:
-        scaled[0] = max(0, min(max_width, scaled[0]))
-        scaled[1] = max(0, min(max_width, scaled[1]))
-    if max_height is not None:
-        scaled[2] = max(0, min(max_height, scaled[2]))
-        scaled[3] = max(0, min(max_height, scaled[3]))
-    return scaled
+# def rescale_coords(coords, scale, max_width=None, max_height=None):
+#     x1, x2, y1, y2 = coords
+#     scaled = [
+#         int(round(x1 * scale)),
+#         int(round(x2 * scale)),
+#         int(round(y1 * scale)),
+#         int(round(y2 * scale)),
+#     ]
+#     if max_width is not None:
+#         scaled[0] = max(0, min(max_width, scaled[0]))
+#         scaled[1] = max(0, min(max_width, scaled[1]))
+#     if max_height is not None:
+#         scaled[2] = max(0, min(max_height, scaled[2]))
+#         scaled[3] = max(0, min(max_height, scaled[3]))
+#     return scaled
 
 
-def bounding_box_exceeds_dimensions(coords, width, height):
-    if not isinstance(coords, list) or len(coords) != 4:
-        return False
-    x1, x2, y1, y2 = coords
-    return x1 > width or x2 > width or y1 > height or y2 > height
+# def bounding_box_exceeds_dimensions(coords, width, height):
+#     if not isinstance(coords, list) or len(coords) != 4:
+#         return False
+#     x1, x2, y1, y2 = coords
+#     return x1 > width or x2 > width or y1 > height or y2 > height
 
 
-def process_item(item, force=False):
-    scale = item.get("scale")
-    width = item.get("compressed_width")
-    height = item.get("compressed_height")
+# def process_item(item, force=False):
+#     scale = item.get("scale")
+#     width = item.get("compressed_width")
+#     height = item.get("compressed_height")
 
-    if scale is None or width is None or height is None:
-        return False, 0
+#     if scale is None or width is None or height is None:
+#         return False, 0
 
-    if not isinstance(scale, (int, float)):
-        try:
-            scale = float(scale)
-        except (TypeError, ValueError):
-            return False, 0
+#     if not isinstance(scale, (int, float)):
+#         try:
+#             scale = float(scale)
+#         except (TypeError, ValueError):
+#             return False, 0
 
-    if scale == 1.0 and not force:
-        return False, 0
+#     if scale == 1.0 and not force:
+#         return False, 0
 
-    needs_scaling = force
-    if not needs_scaling:
-        for value in item.values():
-            if isinstance(value, list):
-                for element in value:
-                    if is_box_object(element) and bounding_box_exceeds_dimensions(
-                        element["b"], width, height
-                    ):
-                        needs_scaling = True
-                        break
-                if needs_scaling:
-                    break
+#     needs_scaling = force
+#     if not needs_scaling:
+#         for value in item.values():
+#             if isinstance(value, list):
+#                 for element in value:
+#                     if is_box_object(element) and bounding_box_exceeds_dimensions(
+#                         element["b"], width, height
+#                     ):
+#                         needs_scaling = True
+#                         break
+#                 if needs_scaling:
+#                     break
 
-    if not needs_scaling:
-        return False, 0
+#     if not needs_scaling:
+#         return False, 0
 
-    changed = 0
-    for value in item.values():
-        if isinstance(value, list):
-            for element in value:
-                if is_box_object(element):
-                    original = element["b"]
-                    scaled = rescale_coords(original, scale, max_width=width, max_height=height)
-                    if scaled != original:
-                        element["b"] = scaled
-                        changed += 1
+#     changed = 0
+#     for value in item.values():
+#         if isinstance(value, list):
+#             for element in value:
+#                 if is_box_object(element):
+#                     original = element["b"]
+#                     scaled = rescale_coords(original, scale, max_width=width, max_height=height)
+#                     if scaled != original:
+#                         element["b"] = scaled
+#                         changed += 1
 
-    return changed > 0, changed
-
-
-def process_file(path: Path, dry_run=False, backup=False, force=False):
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict) or "result" not in data or not isinstance(data["result"], list):
-        return False, 0, 0
-
-    total_changed = 0
-    total_boxes = 0
-    changed_items = 0
-
-    for item in data["result"]:
-        if not isinstance(item, dict):
-            continue
-        item_changed, changed_count = process_item(item, force=force)
-        if item_changed:
-            changed_items += 1
-            total_boxes += changed_count
-
-    if changed_items == 0:
-        return False, 0, 0
-
-    if not dry_run:
-        if backup:
-            backup_path = path.with_suffix(path.suffix + ".bak")
-            with open(backup_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-
-    return True, changed_items, total_boxes
+#     return changed > 0, changed
 
 
-def main():
-    args = parse_args()
-    root_path = Path(args.root)
+# def process_file(path: Path, dry_run=False, backup=False, force=False):
+#     with open(path, "r", encoding="utf-8") as f:
+#         data = json.load(f)
 
-    if not root_path.exists():
-        raise SystemExit(f"Root path does not exist: {root_path}")
+#     if not isinstance(data, dict) or "result" not in data or not isinstance(data["result"], list):
+#         return False, 0, 0
 
-    files = sorted(root_path.rglob("*_defect_data.json"))
-    if not files:
-        raise SystemExit(f"No JSON files found under {root_path}")
+#     total_changed = 0
+#     total_boxes = 0
+#     changed_items = 0
 
-    print(f"Scanning {len(files)} JSON files under {root_path}")
+#     for item in data["result"]:
+#         if not isinstance(item, dict):
+#             continue
+#         item_changed, changed_count = process_item(item, force=force)
+#         if item_changed:
+#             changed_items += 1
+#             total_boxes += changed_count
 
-    total_files = 0
-    total_items = 0
-    total_boxes = 0
-    total_changed_files = 0
+#     if changed_items == 0:
+#         return False, 0, 0
 
-    for path in files:
-        changed, items_changed, boxes_changed = process_file(
-            path, dry_run=args.dry_run, backup=args.backup, force=args.force
-        )
-        total_files += 1
-        total_items += items_changed
-        total_boxes += boxes_changed
-        if changed:
-            total_changed_files += 1
-            print(f"Updated {path}: items={items_changed}, boxes={boxes_changed}")
+#     if not dry_run:
+#         if backup:
+#             backup_path = path.with_suffix(path.suffix + ".bak")
+#             with open(backup_path, "w", encoding="utf-8") as f:
+#                 json.dump(data, f, indent=2)
+#         with open(path, "w", encoding="utf-8") as f:
+#             json.dump(data, f, indent=2)
 
-    print("\nSummary:")
-    print(f"  scanned files: {total_files}")
-    print(f"  updated files: {total_changed_files}")
-    print(f"  updated items: {total_items}")
-    print(f"  updated boxes: {total_boxes}")
-    if args.dry_run:
-        print("  dry run: no files were written")
+#     return True, changed_items, total_boxes
 
+
+# def main():
+#     args = parse_args()
+#     root_path = Path(args.root)
+
+#     if not root_path.exists():
+#         raise SystemExit(f"Root path does not exist: {root_path}")
+
+#     files = sorted(root_path.rglob("*_defect_data.json"))
+#     if not files:
+#         raise SystemExit(f"No JSON files found under {root_path}")
+
+#     print(f"Scanning {len(files)} JSON files under {root_path}")
+
+#     total_files = 0
+#     total_items = 0
+#     total_boxes = 0
+#     total_changed_files = 0
+
+#     for path in files:
+#         changed, items_changed, boxes_changed = process_file(
+#             path, dry_run=args.dry_run, backup=args.backup, force=args.force
+#         )
+#         total_files += 1
+#         total_items += items_changed
+#         total_boxes += boxes_changed
+#         if changed:
+#             total_changed_files += 1
+#             print(f"Updated {path}: items={items_changed}, boxes={boxes_changed}")
+
+#     print("\nSummary:")
+#     print(f"  scanned files: {total_files}")
+#     print(f"  updated files: {total_changed_files}")
+#     print(f"  updated items: {total_items}")
+#     print(f"  updated boxes: {total_boxes}")
+#     if args.dry_run:
+#         print("  dry run: no files were written")
+
+from DEPENDANT.MQTT import MQTT
 
 if __name__ == "__main__":
-    main()
+    mq_obj = MQTT("TEST")
+    while True:
+        mq_obj.publish("taloja/writer", {"light": 1, "roll_num": "DEMO"})
+        mq_obj.publish("taloja/writer", {"light": 0, "roll_num": "DEMO"})

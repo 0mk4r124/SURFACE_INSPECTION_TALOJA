@@ -16,6 +16,7 @@ from threading import Lock, Event
 from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
+from DEPENDANT.WS_SHAPE import analyze_polygon_shape, scale_shape, draw_shape
 
 LOCATION = "TALOJA"
 
@@ -47,7 +48,7 @@ PADDING = 50
 #                        needed; every dbg()/perf call becomes a no-op.
 # =========================================================================
 DEBUG_PARALLEL   = os.environ.get('DEBUG_PARALLEL', '1') == '1'
-DEBUG_STATS_EVERY = int(os.environ.get('DEBUG_STATS_EVERY', '100'))  # perf line every N frames per thread
+DEBUG_STATS_EVERY = int(os.environ.get('DEBUG_STATS_EVERY', '120'))  # perf line every N frames per thread
 
 def dbg(msg):
     """Parallel-run debug trace: [DBG][thread-name] message -> stdout + log."""
@@ -72,13 +73,13 @@ LIVE_FULL_DEFECT_MAP = os.environ.get('LIVE_FULL_DEFECT_MAP', '1') == '1'
 # ---- speed / storage tuning ----
 DEBUG_IMG_INTERVAL = 2.0  # write <cam>_debug.jpg at most once per this many secs
 MQTT_UI_INTERVAL   = 1.0  # publish ui/logic + health at most once per this many secs
-SAVE_SCALE   = float(os.environ.get('SAVE_SCALE', '0.5'))  # stored trash copy is downscaled (inference stays full-size)
-SAVE_QUALITY = int(os.environ.get('SAVE_QUALITY', '60'))   # JPEG quality of stored trash copy
-SAVE_QUEUE_MAX = int(os.environ.get('SAVE_QUEUE_MAX', '128'))
-SAVE_WORKERS = int(os.environ.get('SAVE_WORKERS', '3'))
+SAVE_SCALE   = float(os.environ.get('SAVE_SCALE', '0.8'))  # stored trash copy is downscaled (inference stays full-size)
+SAVE_QUALITY = int(os.environ.get('SAVE_QUALITY', '80'))   # JPEG quality of stored trash copy
+SAVE_QUEUE_MAX = int(os.environ.get('SAVE_QUEUE_MAX', '1024'))
+SAVE_WORKERS = int(os.environ.get('SAVE_WORKERS', '24'))
 
 # ---- background orphan recovery ----
-ORPHAN_MAX = int(os.environ.get('ORPHAN_MAX', '2'))   # orphan cycles recovered in parallel
+ORPHAN_MAX = int(os.environ.get('ORPHAN_MAX', '3'))   # orphan cycles recovered in parallel
 # Orphans now run on their OWN dedicated models (see NUM_MODELS), so they no
 # longer need to yield the GPU to the live cycle. Set >0 only if live latency
 # ever suffers under heavy backlog drain.
@@ -100,12 +101,12 @@ LIVE_STALL_TIMEOUT = float(os.environ.get('LIVE_STALL_TIMEOUT', '300'))
 # (original behavior); models[2:] form a checkout pool for orphan recovery.
 # 2 models ~ 12 GB observed on the A5000 -> 4 fits 24 GB with FP16 on.
 # If CUDA OOM appears in the logs, set NUM_MODELS=3.
-NUM_MODELS = int(os.environ.get('NUM_MODELS', '4'))
+NUM_MODELS = int(os.environ.get('NUM_MODELS', '8'))
 INFER_FP16 = os.environ.get('INFER_FP16', '1') == '1'   # FP16 autocast on Ampere: ~1.7-2x
 
 # ---- CPU-side pipeline threads (64-core box has plenty of headroom) ----
-LOADER_WORKERS = int(os.environ.get('LOADER_WORKERS', '8'))
-SAVER_POOL_WORKERS = int(os.environ.get('SAVER_POOL_WORKERS', '8'))
+LOADER_WORKERS = int(os.environ.get('LOADER_WORKERS', '24'))
+SAVER_POOL_WORKERS = int(os.environ.get('SAVER_POOL_WORKERS', '24'))
 
 update_lock = Lock()
 summary_lock = Lock()
@@ -127,6 +128,11 @@ DEFECT_CONFIG = {
     "D": {"name": "DENT",   "color": (0, 0, 255)},    # Red
     "C": {"name": "SCRATCH",   "color": (0, 255, 0)},    # Green
 }
+
+# White-spot shape gate:
+#   "flag" (default) = keep rejected spots, just mark them (current behaviour)
+#   "drop"           = a white spot that fails the oval/egg test is discarded
+WS_REJECT_MODE = os.environ.get("WS_REJECT_MODE", "flag").lower()
 
 logger = initializeLogger("LOGIC", LOGS_PATH=LOGS_PATH)
 
@@ -416,11 +422,16 @@ def process_labels(labels, img_shape):
 
             raw_cls = str(label[5]).upper()
 
+            # polygon from INFERENCE (index 9); None for non-shape classes
+            poly = label[9] if len(label) > 9 else None
+
         except:
             continue
 
-        # normalize + filter
+        # normalize + filter 
         if "OIL_STAIN" == raw_cls:
+            cls = "O"
+        elif "OIL_SPREAD" == raw_cls:
             cls = "O"
         elif "OIL_STAIN_FAINT" == raw_cls:
             cls = "O"
@@ -453,11 +464,21 @@ def process_labels(labels, img_shape):
         # visual frame maps full width to 300 mm (±150mm from center)
         distance_mm = ((box_center_x - (w / 2.0)) / float(w)) * 300.0
 
-        defect_boxes[cls].append({
+        item = {
             "b": [x1, x2, y1, y2],
             "c": int(round(score, 3)*100),
             "pos_mm": round(distance_mm, 2)
-        })
+        }
+
+        # ---- white spot shape gate: symmetric egg / oval, not overstretched ----
+        if cls == "W" and poly:
+            shp = analyze_polygon_shape(poly, mm_per_px=300.0 / float(w))
+            if shp:
+                item["shape"] = shp
+                if WS_REJECT_MODE == "drop" and not shp.get("ok", True):
+                    continue
+
+        defect_boxes[cls].append(item)
 
     counts = {k: len(v) for k, v in defect_boxes.items()}
     return defect_boxes, counts
@@ -482,6 +503,8 @@ def scale_defect_boxes(defect_boxes, orig_shape, scale):
                 max(0, min(new_h, int(round(y1 * scale)))),
                 max(0, min(new_h, int(round(y2 * scale))))
             ]
+            if scaled_item.get("shape"):
+                scaled_item["shape"] = scale_shape(scaled_item["shape"], scale)
             scaled[cls].append(scaled_item)
 
     return scaled
@@ -524,6 +547,15 @@ def draw_boxes(img, defect_boxes):
             )
 
             cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+
+            # fitted ellipse: yellow = accepted oval/egg, red = rejected
+            shp = obj.get("shape")
+            if shp:
+                draw_shape(img, shp)
+                label += f" [{shp.get('shape','?')}"
+                if shp.get("maj_mm"):
+                    label += f" {shp['maj_mm']}x{shp['min_mm']}mm"
+                label += "]"
 
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
 
@@ -1310,10 +1342,10 @@ def _build_model(tag):
     return MASKRCNN(
         tag,
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_30JULY"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_20AUG"),
         "model_final.pth",
-        0.60,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_30JULY/TALOJA_MODEL_30JULY.json"),
+        0.80,
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_20AUG/TALOJA_MODEL_20AUG.json"),
         False,
         GPU_ID=0
     )

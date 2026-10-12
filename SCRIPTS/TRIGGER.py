@@ -101,12 +101,12 @@ def main():
                     roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
                     conn = getDBconn()
                     coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
-                    if not (("STCS" in coil_id) or ("STCL" in coil_id)): 
-                         print(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL")    
-                         logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == STCS/STCL")        
+                    if not (("LPHU" in coil_id) or ("LPML" in coil_id) or ("STCL" in coil_id) or ("STCS" in coil_id)): 
+                         print(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS | mill_speed = {mill_speed} | width = {width}")    
+                         logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS")        
                          continue
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
-                    print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()}")
+                    print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()} | width = {width}")
                     logger.info(f"Trigger recieved - {roll_num} - {coil_id}")
                     time.sleep(2)
 
@@ -144,7 +144,7 @@ def main():
 
                # logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                # logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
-               print(f"diameter = {diameter} | mill_run = {mill_run} | ironing_raised = {ironing_raised} - {datetime.now()}")
+               print(f"diameter = {diameter} | mill_run = {mill_run}| mill_speed = {mill_speed} | ironing_raised = {ironing_raised} - {datetime.now()}")
                mq_obj.publish("taloja/health", {"service": "TRIGGER"})
                time.sleep(2)
 

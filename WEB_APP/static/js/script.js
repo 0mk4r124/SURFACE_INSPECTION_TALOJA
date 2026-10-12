@@ -8,6 +8,12 @@ let statusCheckInterval = null;
 let systemData = {};  
 let modalOpen = false; 
 let rdCoilMap = null;
+// ---- defect carousel / details panel ----
+const FRAME_WIDTH_MM   = 400;   // MUST match backend FRAME_WIDTH_MM (was hardcoded 300)
+const CLICK_NAV_ENABLED = true; // left-click = prev, right-click = next on the image
+let defectNavList  = [];
+let defectNavIndex = -1;
+let defectNavCtx   = { coilId: "", cycleUid: "" };
 let rdPendingData = null; 
 const DEFECT_NAMES = {
     'O': 'Oil Stain',
@@ -129,6 +135,9 @@ document.getElementById("imageModal").addEventListener("hidden.bs.modal", functi
     imageLoader.style.display = "none";
     modalOpen = false;
     isImageLoading = false;
+    defectNavList  = [];
+    defectNavIndex = -1;
+    setDefectNavUI(false);
 });
 
 // Open / update image modal (reuses existing modal if already open)
@@ -166,7 +175,133 @@ function openImageModal(imgUrl, title) {
     }
 }
 
-// Helper for defect clicks
+// ======================== DEFECT CAROUSEL + DETAILS ========================
+function clearDefectNav() {
+    defectNavList  = [];
+    defectNavIndex = -1;
+    setDefectNavUI(false);
+}
+
+function openDefectCarousel(list, current, ctx) {
+    defectNavList = (Array.isArray(list) && list.length) ? list : (current ? [current] : []);
+    defectNavCtx  = ctx || { coilId: "", cycleUid: "" };
+
+    let idx = defectNavList.indexOf(current);           // same-reference case
+    if (idx < 0 && current) {
+        idx = defectNavList.findIndex(d =>
+            (current._uid != null && d._uid === current._uid) ||
+            (d.frame === current.frame &&
+             d.type  === current.type  &&
+             String(d.box) === String(current.box))
+        );
+    }
+    if (idx < 0) {
+        console.warn("Clicked defect not found in filtered list", current);
+        idx = 0;
+    }
+
+    defectNavIndex = idx;
+    showDefectAt(defectNavIndex);
+}
+
+function showDefectAt(idx) {
+    if (!defectNavList.length) return;
+    if (idx < 0) idx = defectNavList.length - 1;              // wrap
+    if (idx >= defectNavList.length) idx = 0;
+    defectNavIndex = idx;
+    const point = defectNavList[idx];
+    setDefectNavUI(true);
+    renderDefectDetails(point);
+    openDefectImage(point);
+}
+
+function stepDefect(delta) {
+    if (defectNavList.length < 2) return;
+    showDefectAt(defectNavIndex + delta);
+}
+
+function setDefectNavUI(show) {
+    const panel = document.getElementById("defectDetailsPanel");
+    const prev  = document.getElementById("defectPrevBtn");
+    const next  = document.getElementById("defectNextBtn");
+    const cnt   = document.getElementById("defectNavCounter");
+    const multi = defectNavList.length > 1;
+
+    if (panel) panel.style.display = show ? "block" : "none";
+    if (prev)  prev.style.display  = (show && multi) ? "flex" : "none";
+    if (next)  next.style.display  = (show && multi) ? "flex" : "none";
+    if (cnt) {
+        cnt.style.display = (show && defectNavList.length) ? "inline-block" : "none";
+        cnt.innerText = `${defectNavIndex + 1} / ${defectNavList.length}`;
+    }
+}
+
+function defectMetrics(point) {
+    const imgW    = Number(point.imgW) || Number(point._natW) || 0;
+    const mmPerPx = imgW > 0 ? (FRAME_WIDTH_MM / imgW) : 0;
+    const box     = (Array.isArray(point.box) && point.box.length === 4) ? point.box : null;
+
+    let wMm = null, hMm = null, offMm = null, side = "-";
+
+    if (box && mmPerPx) {
+        const [x1, x2, y1, y2] = box;
+        wMm = Math.abs(x2 - x1) * mmPerPx;
+        hMm = Math.abs(y2 - y1) * mmPerPx;
+        const off = ((x1 + x2) / 2) - (imgW / 2);
+        offMm = Math.abs(off * mmPerPx);
+        side  = off < 0 ? "OS" : (off > 0 ? "DS" : "CENTER");
+    }
+
+    // backend values win when present
+    if (point.wMm != null) wMm = Number(point.wMm);
+    if (point.hMm != null) hMm = Number(point.hMm);
+    const p = Number(point.widthPos);
+    if (!isNaN(p) && (p !== 0 || offMm == null)) {
+        offMm = Math.abs(p);
+        side  = p < 0 ? "OS" : (p > 0 ? "DS" : "CENTER");
+    }
+
+    const lenMm = Number(point.length) || 0;
+    return {
+        wMm, hMm, offMm, side, lenMm,
+        areaMm: (wMm != null && hMm != null) ? (wMm * hMm) : null
+    };
+}
+
+function renderDefectDetails(point) {
+    const body = document.getElementById("defectDetailsBody");
+    if (!body || !point) return;
+
+    const m     = defectMetrics(point);
+    const name  = DEFECT_NAMES[point.type] || point.type || "-";
+    const color = defectColors[point.type] || "#333333";
+    const n     = (v, d = 1) => (v == null || isNaN(v)) ? "-" : Number(v).toFixed(d);
+
+    const rows = [
+        ["COIL ID",    defectNavCtx.coilId   || "-"],
+        ["CYCLE UID",  defectNavCtx.cycleUid || "-"],
+        ["DEFECT",     `<span class="im-dot" style="background:${color}"></span>${name} (${point.type || "-"})`],
+        ["CONFIDENCE", point.confidence != null ? `${point.confidence} %` : "-"],
+        ["FRAME",      point.frame != null ? point.frame : "-"],
+        ["LENGTH",     `${(m.lenMm / 1000).toFixed(2)} m <span class="im-sub">(${m.lenMm} mm)</span>`],
+        ["POSITION",   m.offMm == null ? "-" : `${m.side} ${n(m.offMm)} mm`],
+        ["WIDTH",      `${n(m.wMm)} mm`],
+        ["HEIGHT",     `${n(m.hMm)} mm`],
+        ["AREA",       m.areaMm == null ? "-" : `${n(m.areaMm, 0)} mm&sup2;`],
+        ["SEVERITY",   point.severity || "-"],
+        ["DIAMETER",   point.diameter   != null ? point.diameter   : "-"],
+        ["EG SETPOINT", point.egSetpoint != null ? point.egSetpoint : "-"],
+        ["BOX (px)",   Array.isArray(point.box)
+                        ? `${point.box[0]}, ${point.box[2]} &rarr; ${point.box[1]}, ${point.box[3]}`
+                        : "-"],
+        ["FRAME WIDTH", `${FRAME_WIDTH_MM} mm`]
+    ];
+
+    body.innerHTML = rows
+        .map(([k, v]) => `<div class="im-row"><div class="im-key">${k}</div><div class="im-val">${v}</div></div>`)
+        .join("");
+}
+
 // Helper for defect clicks
 function openDefectImage(point) {
     const rawPath = point.rawImg || "";
@@ -177,7 +312,7 @@ function openDefectImage(point) {
         ? `Frame ${frameNum} | ${point.length != null ? Math.floor(point.length / 1000) : ""} m`
         : (DEFECT_NAMES[point.type] || point.type || "Defect");
 
-    console.log("openDefectImage called with:", { point, rawPath, fallback, title });
+    // console.log("openDefectImage called with:", { point, rawPath, fallback, title });
 
     if (rawPath && point.box) {
         const rawUrl = "/api/serve-file?file=" + encodeURIComponent(rawPath);
@@ -194,7 +329,10 @@ function openDefectImage(point) {
 
             const imgW = tmpImg.naturalWidth;
             const centerX = imgW / 2;
-            const mmPerPixel = 300 / imgW;
+            const mmPerPixel = FRAME_WIDTH_MM / imgW;
+
+            // older JSONs have no compressed_width -> fill it in and redraw the panel
+            if (!point.imgW) { point._natW = imgW; renderDefectDetails(point); }
 
             // box format: [x1, x2, y1, y2]
             const [bx1, bx2, by1, by2] = point.box;
@@ -334,11 +472,21 @@ class CoilMap {
                                 img: frame.img || null,
                                 rawImg: frame.raw_img || null,
                                 box: defect.b || null,
+                                severity: frame.s || null,
+                                diameter: frame.d != null ? frame.d : null,
+                                egSetpoint: frame.e != null ? frame.e : null,
+                                imgW: frame.compressed_width  || null,
+                                imgH: frame.compressed_height || null,
+                                wMm: defect.w_mm != null ? defect.w_mm : null,
+                                hMm: defect.h_mm != null ? defect.h_mm : null,
                             });
                         });
                     }
                 });
         });
+                
+        // stable identity - visiblePoints holds spread-copies, not references
+        this.defects.forEach((d, i) => { d._uid = i; });
 
         // --- NEW: fallback when 'l' (distance) is missing/flat for the whole roll ---
         if (this.defects.length > 0) {
@@ -476,11 +624,27 @@ class CoilMap {
             const my = e.clientY - rect.top;
             for (let defect of this.visiblePoints) {
                 if (Math.hypot(mx - defect.x, my - defect.y) < 8 && defect.img) {
-                    openDefectImage(defect);
+                    openDefectCarousel(this.getFilteredDefects(), defect, this.getContext());
                     break;
                 }
             }
         });
+    }
+        
+    // All defects passing the CURRENT filter buttons, ordered along the coil
+    getFilteredDefects() {
+        return this.defects
+            .filter(d => this.filters[d.type] && d.img)
+            .sort((a, b) => (a.length - b.length) || ((a.frame || 0) - (b.frame || 0)));
+    }
+
+    getContext() {
+        const isRd = this.canvas && this.canvas.id === "rdCoilMap";
+        const g = id => (document.getElementById(id)?.innerText || "").trim();
+        return {
+            coilId:   isRd ? g("rdCoilId")   : (g("siCoilId")   || g("coil_id")),
+            cycleUid: isRd ? g("rdCycleUid") : (g("siCycleUid") || g("cycle_uid"))
+        };
     }
 
     resetZoom() {
@@ -944,6 +1108,7 @@ document.addEventListener("DOMContentLoaded", () => {
         slot.addEventListener('click', () => {
             const img = slot.querySelector('img');
             if (img && img.src) {
+                clearDefectNav();
                 openImageModal(img.src, 'Live Camera Feed');
             } else {
                 console.warn('No image in camera slot');
@@ -1000,3 +1165,32 @@ document.addEventListener("DOMContentLoaded", () => {
         rdPendingData = null;
     });
 });
+
+// ======================== DEFECT CAROUSEL BINDINGS ========================
+(function bindDefectCarousel() {
+    const prevBtn = document.getElementById("defectPrevBtn");
+    const nextBtn = document.getElementById("defectNextBtn");
+    if (prevBtn) prevBtn.addEventListener("click", e => { e.stopPropagation(); stepDefect(-1); });
+    if (nextBtn) nextBtn.addEventListener("click", e => { e.stopPropagation(); stepDefect(1); });
+
+    document.addEventListener("keydown", e => {
+        if (!modalOpen || defectNavList.length < 2) return;
+        if (e.key === "ArrowLeft")  { e.preventDefault(); stepDefect(-1); }
+        if (e.key === "ArrowRight") { e.preventDefault(); stepDefect(1);  }
+    });
+
+    if (CLICK_NAV_ENABLED && typeof zoomWrapper !== "undefined" && zoomWrapper) {
+        let downX = 0, downY = 0;
+        zoomWrapper.addEventListener("mousedown", e => { downX = e.clientX; downY = e.clientY; });
+        zoomWrapper.addEventListener("click", e => {
+            if (defectNavList.length < 2 || scale > 1) return;                     // don't fight pan/zoom
+            if (Math.hypot(e.clientX - downX, e.clientY - downY) > 4) return;      // it was a drag
+            stepDefect(-1);
+        });
+        zoomWrapper.addEventListener("contextmenu", e => {
+            if (defectNavList.length < 2) return;
+            e.preventDefault();
+            stepDefect(1);
+        });
+    }
+})();

@@ -20,6 +20,14 @@ from datetime import datetime
 from urllib.parse import unquote, urlparse
 
 # Create your views here.
+DEFECT_LABELS = {
+    "O": "Oil Stain",
+    "W": "White Spot",
+    "S": "Scoring",
+    "D": "Dent",
+    "C": "Scratch",
+    "V": "V",          # keep for legacy rows written before the rename
+}
 
 def to_naive(dt):
     if dt is None:
@@ -46,7 +54,7 @@ def parse_last_ping(value):
         return dt.strftime("%d-%m-%Y %I:%M%p")
     except ValueError:
         return None
-    
+
 @method_decorator([login_required], name='dispatch') # password_expiry_required
 class APIDashboardView(TemplateView):
     template_name = 'dashboards/api_dashboard.html'
@@ -181,17 +189,14 @@ def fetch_history_data(request):
                 # keys: total_frames, total_defects, total_defective_frames,
                 #       defect_frames, V, D, S, C, ...
                 summary = json.loads(row.defect_details)
-
                 total_frames = int(summary.get("total_frames", 0) or 0)
                 total_defects = int(summary.get("total_defects", 0) or 0)
                 total_defect_frames = int(
-                    summary.get(
-                        "total_defective_frames",
-                        summary.get("defect_frames", 0)
-                    ) or 0
+                    summary.get("total_defective_frames", summary.get("defect_frames", 0)) or 0
                 )
 
-                for key in ["V", "D", "S", "C"]:
+                defect_summary = {}
+                for key in DEFECT_LABELS:
                     val = int(summary.get(key, 0) or 0)
                     if val > 0:
                         defect_summary[key] = val
@@ -200,7 +205,7 @@ def fetch_history_data(request):
                 pass
 
         summary_text = ", ".join(
-            [f"{k}:{v}" for k, v in defect_summary.items()]
+            f"{DEFECT_LABELS[k]}: {v}" for k, v in defect_summary.items()
         )
 
         results.append({
@@ -211,7 +216,7 @@ def fetch_history_data(request):
             "total_defects":     total_defects,
             "total_frames":      total_frames,
             "total_defect_frames": total_defect_frames,
-            "defect_summary":    summary_text[:60] + ("..." if len(summary_text) > 60 else ""),
+            "defect_summary":    summary_text,
         })
 
     return JsonResponse({

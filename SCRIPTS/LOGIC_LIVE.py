@@ -95,8 +95,7 @@ def main():
 
     base = os.path.join(L.RAW_PATH, L.LOCATION)
 
-    threading.Thread(target=_claim_heartbeat,
-                     name="live_claim_hb", daemon=True).start()
+    threading.Thread(target=_claim_heartbeat, name="live_claim_hb", daemon=True).start()
 
     cleanup_stale_claims()
 
