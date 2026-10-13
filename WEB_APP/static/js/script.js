@@ -11,6 +11,20 @@ let rdCoilMap = null;
 // ---- defect carousel / details panel ----
 const FRAME_WIDTH_MM   = 400;   // MUST match backend FRAME_WIDTH_MM (was hardcoded 300)
 const CLICK_NAV_ENABLED = true; // left-click = prev, right-click = next on the image
+const MAP_BUCKET_M     = 1;     // coil map: 1 dot per type per metre at 1x zoom (bucket = 1 m / zoom)
+const MAP_WIDTH_BIN_MM = 10;    // coil map: same-type defects within a 10 mm width band share that dot
+
+// coil map: per-type minimum confidence (%) to be shown. Types not listed show at any score.
+const MAP_MIN_CONF = { W: 50, O: 90 };
+
+function passesMapConf(d) {
+    const min = MAP_MIN_CONF[d.type];
+    if (min == null) return true;
+    let c = Number(d.confidence);
+    if (isNaN(c)) return false;
+    if (c <= 1) c *= 100;          // tolerate 0-1 scores from older JSONs
+    return c >= min;
+}
 let defectNavList  = [];
 let defectNavIndex = -1;
 let defectNavCtx   = { coilId: "", cycleUid: "" };
@@ -220,6 +234,107 @@ function stepDefect(delta) {
     showDefectAt(defectNavIndex + delta);
 }
 
+// ======================== DEFECT IMAGE DOWNLOAD (image + details pane) ========================
+function _rectOverlap(a, b) {   // rects as [x, y, w, h]
+    const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
+    const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+    return (w > 0 && h > 0) ? w * h : 0;
+}
+
+function downloadDefectImage() {
+    if (isImageLoading || !modalImg.naturalWidth) return;
+
+    const W = modalImg.naturalWidth, H = modalImg.naturalHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(modalImg, 0, 0);   // already has box + label drawn
+
+    const point = (defectNavIndex >= 0) ? defectNavList[defectNavIndex] : null;
+    const panel = document.getElementById("defectDetailsPanel");
+    const rows = (panel && panel.style.display !== "none")
+        ? [...document.querySelectorAll("#defectDetailsBody .im-row")].map(r => [
+              (r.querySelector(".im-key")?.innerText || "").trim(),
+              (r.querySelector(".im-val")?.innerText || "").trim()
+          ])
+        : [];
+
+    if (rows.length) {
+        let fs = Math.max(12, Math.round(W / 80));           // scale text to image size
+        const pad = Math.round(fs * 0.8), margin = Math.round(fs * 0.6);
+        const measure = (f) => {
+            ctx.font = `bold ${f}px monospace`;
+            return [Math.max(...rows.map(r => ctx.measureText(r[0]).width)),
+                    Math.max(...rows.map(r => ctx.measureText(r[1]).width))];
+        };
+        let [keyW, valW] = measure(fs);
+        while (keyW + valW + pad * 3 > W * 0.45 && fs > 10) { fs--; [keyW, valW] = measure(fs); }
+
+        const lineH  = Math.round(fs * 1.55);
+        const panelW = keyW + valW + pad * 3;
+        const panelH = pad * 2 + lineH * (rows.length + 1);
+
+        // regions the pane must not cover: defect box + its label
+        const avoid = [];
+        if (point && Array.isArray(point.box)) {
+            const [x1, x2, y1, y2] = point.box;
+            avoid.push([x1, y1, x2 - x1, y2 - y1]);
+        }
+        if (point && point._labelRect) avoid.push(point._labelRect);
+
+        // right first, else left; bottom corners only if both top corners collide
+        const cands = [
+            [W - panelW - margin, margin],
+            [margin, margin],
+            [W - panelW - margin, H - panelH - margin],
+            [margin, H - panelH - margin]
+        ].map(([x, y]) => [Math.max(0, x), Math.max(0, y), panelW, panelH]);
+
+        let best = cands[0], bestOv = Infinity;
+        for (const c of cands) {
+            const ov = avoid.reduce((s, a) => s + _rectOverlap(c, a), 0);
+            if (ov < bestOv) { best = c; bestOv = ov; }
+            if (ov === 0) break;
+        }
+        const [px, py] = best;
+
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.fillRect(px, py, panelW, panelH);
+        ctx.strokeStyle = "#00c9a7";
+        ctx.lineWidth = Math.max(1, Math.round(fs / 8));
+        ctx.strokeRect(px, py, panelW, panelH);
+
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#00a88c";
+        ctx.fillText("DEFECT DETAILS", px + pad, py + pad + lineH / 2);
+        rows.forEach(([k, v], i) => {
+            const y = py + pad + lineH * (i + 1.5);
+            ctx.fillStyle = "#7a838f"; ctx.fillText(k, px + pad, y);
+            ctx.fillStyle = "#16323b"; ctx.fillText(v, px + pad * 2 + keyW, y);
+        });
+    }
+
+    const safe = s => String(s ?? "").replace(/[^\w.-]+/g, "_");
+    const name = point
+        ? `${safe(defectNavCtx.coilId || "coil")}_F${safe(point.frame)}_${safe(point.type)}_` +
+          `${Math.floor((Number(point.length) || 0) / 1000)}m.jpg`
+        : `defect_${Date.now()}.jpg`;
+
+    canvas.toBlob(blob => {
+        if (!blob) { console.error("download: toBlob failed", W, H); return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/jpeg", 0.95);
+}
+
+document.getElementById("defectDownloadBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    downloadDefectImage();
+});
+
 function setDefectNavUI(show) {
     const panel = document.getElementById("defectDetailsPanel");
     const prev  = document.getElementById("defectPrevBtn");
@@ -363,19 +478,23 @@ function openDefectImage(point) {
             const textWidth = ctx.measureText(label).width;
             const textHeight = 26;
 
-            let labelX = bx1;
-            let labelY = by1 - 8;
+            const labelW = textWidth + 12;
 
-            // Prevent overflow at top
-            if (labelY < textHeight) {
-                labelY = by1 + textHeight;
+            // keep the label fully inside the image (defects at OS/DS edges)
+            let labelX = Math.max(0, Math.min(bx1, canvas.width - labelW));
+            let labelY = by1 - 8;                                   // bottom of label box
+            if (labelY - textHeight < 0) {                          // no room above the box
+                labelY = (by2 + 8 + textHeight <= canvas.height)
+                    ? by2 + 8 + textHeight                          // below the box
+                    : Math.max(by1, 0) + textHeight;                // inside, top of box
             }
+            point._labelRect = [labelX, labelY - textHeight, labelW, textHeight];  // used by download
 
             ctx.fillStyle = color;
             ctx.fillRect(
                 labelX,
                 labelY - textHeight,
-                textWidth + 12,
+                labelW,
                 textHeight
             );
 
@@ -517,7 +636,7 @@ class CoilMap {
     mapPoint(defect) {
         const normX = (defect.length - this.minLen) / (this.maxLen - this.minLen || 1);
         const x = (normX * this.canvas.width * this.scaleX) + this.offsetX;
-        const normY = (defect.widthPos + 150) / 300;
+        const normY = (defect.widthPos + FRAME_WIDTH_MM / 2) / FRAME_WIDTH_MM;
         const y = this.canvas.height - (normY * this.canvas.height);
         return { x, y };
     }
@@ -535,8 +654,23 @@ class CoilMap {
         const cols = Math.ceil(this.canvas.width / CELL) + 4;
         const occupied = new Set();
 
-        for (let defect of this.defects) {
-            if (!this.filters[defect.type]) continue;
+        // ---- aggregate: 1 dot per (type, length bucket, width band) ----
+        // bucket shrinks with zoom so zooming in splits dots back out
+        const bucketMm = (MAP_BUCKET_M * 1000) / this.scaleX;
+        const buckets = new Map();
+        for (const d of this.defects) {
+            if (!this.filters[d.type] || !passesMapConf(d)) continue;
+            const key = `${d.type}|${Math.floor(d.length / bucketMm)}|${Math.round(d.widthPos / MAP_WIDTH_BIN_MM)}`;
+            const cur = buckets.get(key);
+            if (!cur) {
+                buckets.set(key, { rep: d, count: 1 });
+            } else {
+                cur.count++;
+                if ((d.confidence || 0) > (cur.rep.confidence || 0)) cur.rep = d;   // highest confidence represents
+            }
+        }
+
+        for (const { rep: defect, count } of buckets.values()) {
             const p = this.mapPoint(defect);
             if (p.x < -10 || p.x > this.canvas.width + 10) continue;
 
@@ -568,7 +702,7 @@ class CoilMap {
             const fx = cx * CELL;
             const fy = Math.min(Math.max(cy * CELL, R), this.canvas.height - R);
 
-            this.visiblePoints.push({ ...defect, x: fx, y: fy });
+            this.visiblePoints.push({ ...defect, x: fx, y: fy, count });
             ctx.beginPath();
             ctx.arc(fx, fy, R, 0, Math.PI * 2);
             ctx.fillStyle = this.getColor(defect.type);
@@ -608,7 +742,8 @@ class CoilMap {
                     this.tooltip.style.left = (e.clientX + 15) + "px";
                     this.tooltip.style.top  = (e.clientY + 15) + "px";
                     const defectFullName = DEFECT_NAMES[defect.type] || defect.type;
-                    this.tooltip.innerHTML = `<b>${defectFullName}</b><br>Frame: ${defect.frame}<br>Length: ${defect.length} mm<br>Width: ${defect.widthPos} mm`;
+                    this.tooltip.innerHTML = `<b>${defectFullName}</b><br>Frame: ${defect.frame}<br>Length: ${defect.length} mm<br>Width: ${defect.widthPos} mm` +
+                        (defect.count > 1 ? `<br><i>${defect.count} defects here - zoom in to split</i>` : "");
                     found = true;
                     break;
                 }
@@ -634,7 +769,7 @@ class CoilMap {
     // All defects passing the CURRENT filter buttons, ordered along the coil
     getFilteredDefects() {
         return this.defects
-            .filter(d => this.filters[d.type] && d.img)
+            .filter(d => this.filters[d.type] && d.img && passesMapConf(d))
             .sort((a, b) => (a.length - b.length) || ((a.frame || 0) - (b.frame || 0)));
     }
 

@@ -21,7 +21,7 @@ from DEPENDANT.WS_SHAPE import analyze_polygon_shape, scale_shape, draw_shape
 LOCATION = "TALOJA"
 
 # /home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA /home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA
-BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/')
+BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
 
 MODEL_DIR = os.path.join(BASE_FILE_PATH, "DEBUGS", "MODEL")
 RAW_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "RAW_IMG")
@@ -133,6 +133,19 @@ DEFECT_CONFIG = {
 #   "flag" (default) = keep rejected spots, just mark them (current behaviour)
 #   "drop"           = a white spot that fails the oval/egg test is discarded
 WS_REJECT_MODE = os.environ.get("WS_REJECT_MODE", "flag").lower()
+
+# physical width covered by one frame - MUST match script.js FRAME_WIDTH_MM
+FRAME_WIDTH_MM = float(os.environ.get("FRAME_WIDTH_MM", "400"))
+
+# scoring: only report scoring whose longest box side exceeds this (mm).
+# Converted per frame: min_px = SCORING_MIN_LEN_MM * frame_width_px / FRAME_WIDTH_MM
+SCORING_MIN_LEN_MM = float(os.environ.get("SCORING_MIN_LEN_MM", "40"))
+
+# overlap dedup: when two defects in a frame overlap by more than this
+# (intersection / smaller box area), only the higher-confidence one is kept.
+# 0 = disabled. DEDUP_CROSS_CLASS=0 restricts dedup to the same class.
+DEDUP_OVERLAP     = float(os.environ.get("DEDUP_OVERLAP", "0.80"))
+DEDUP_CROSS_CLASS = os.environ.get("DEDUP_CROSS_CLASS", "1") == "1"
 
 logger = initializeLogger("LOGIC", LOGS_PATH=LOGS_PATH)
 
@@ -406,6 +419,44 @@ def calculate_severity(total):
         return "MEDIUM"
     return "HIGH"
 
+def _box_overlap_ratio(a, b):
+    """Intersection / area of the SMALLER box. Boxes are [x1, x2, y1, y2]."""
+    ax1, ax2, ay1, ay2 = a
+    bx1, bx2, by1, by2 = b
+    iw = min(ax2, bx2) - max(ax1, bx1)
+    ih = min(ay2, by2) - max(ay1, by1)
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    smaller = min((ax2 - ax1) * (ay2 - ay1), (bx2 - bx1) * (by2 - by1))
+    return (iw * ih) / float(smaller) if smaller > 0 else 0.0
+
+
+def dedup_overlapping(defect_boxes):
+    """Keep only the highest-confidence defect among any group overlapping
+    by more than DEDUP_OVERLAP. Also strips the temporary '_s' score key."""
+    flat = [(cls, it) for cls, items in defect_boxes.items() for it in items]
+
+    if DEDUP_OVERLAP > 0:
+        # highest raw score first; tie -> larger box
+        flat.sort(key=lambda t: (t[1].get("_s", t[1].get("c", 0) / 100.0),
+                                 (t[1]["b"][1] - t[1]["b"][0]) * (t[1]["b"][3] - t[1]["b"][2])),
+                  reverse=True)
+        kept = []
+        for cls, it in flat:
+            if any((DEDUP_CROSS_CLASS or kc == cls)
+                   and _box_overlap_ratio(it["b"], k["b"]) > DEDUP_OVERLAP
+                   for kc, k in kept):
+                continue
+            kept.append((cls, it))
+        flat = kept
+
+    out = defaultdict(list)
+    for cls, it in flat:
+        it.pop("_s", None)          # never let the float score reach JSON/DB
+        out[cls].append(it)
+    return out
+
+
 def process_labels(labels, img_shape):
     h, w = img_shape[:2]
     defect_boxes = defaultdict(list)
@@ -429,21 +480,20 @@ def process_labels(labels, img_shape):
             continue
 
         # normalize + filter 
-        if "OIL_STAIN" == raw_cls:
-            cls = "O"
-        elif "OIL_SPREAD" == raw_cls:
-            cls = "O"
-        elif "OIL_STAIN_FAINT" == raw_cls:
-            cls = "O"
+        if "OIL" in raw_cls:
+            if score > 0.80:
+                cls = "O"
         elif "WHITE_SPOT" == raw_cls:
-            cls = "W"
+            if score > 0.85:
+                cls = "W"
         elif "SCORING" == raw_cls:
-            if score < 0.95:
+            if score < 0.40:
                 cls = "O"
             else:
                 cls = "S"
         elif "DENT" == raw_cls:
-            cls = "D"
+            if score > 0.85:
+                cls = "D"
         elif "SCRATCH" == raw_cls:
             cls = "C"
         else:
@@ -451,8 +501,15 @@ def process_labels(labels, img_shape):
 
         if cls not in ALLOWED_DEFECTS:
             continue
-        if score < 0.60:
-            continue
+        # if score < 0.70:
+        #     continue
+
+        # ---- scoring length gate: pass only scoring longer than SCORING_MIN_LEN_MM ----
+        # measured on the raw (unpadded) box, longest side, mm -> px via frame width
+        if cls == "S":
+            min_len_px = SCORING_MIN_LEN_MM * float(w) / FRAME_WIDTH_MM
+            if max(x2 - x1, y2 - y1) <= min_len_px:
+                continue
 
         # padding
         x1 = max(0, x1 - PADDING)
@@ -461,24 +518,28 @@ def process_labels(labels, img_shape):
         y2 = min(h, y2 + PADDING)
 
         box_center_x = (x1 + x2) / 2.0
-        # visual frame maps full width to 300 mm (±150mm from center)
-        distance_mm = ((box_center_x - (w / 2.0)) / float(w)) * 300.0
+        # full frame width maps to FRAME_WIDTH_MM (±FRAME_WIDTH_MM/2 from center)
+        distance_mm = ((box_center_x - (w / 2.0)) / float(w)) * FRAME_WIDTH_MM
 
         item = {
             "b": [x1, x2, y1, y2],
             "c": int(round(score, 3)*100),
-            "pos_mm": round(distance_mm, 2)
+            "pos_mm": round(distance_mm, 2),
+            "_s": score,            # temp: raw score for dedup precedence, removed before return
         }
 
         # ---- white spot shape gate: symmetric egg / oval, not overstretched ----
         if cls == "W" and poly:
-            shp = analyze_polygon_shape(poly, mm_per_px=300.0 / float(w))
+            shp = analyze_polygon_shape(poly, mm_per_px=FRAME_WIDTH_MM / float(w))
             if shp:
                 item["shape"] = shp
                 if WS_REJECT_MODE == "drop" and not shp.get("ok", True):
                     continue
 
         defect_boxes[cls].append(item)
+
+    # ---- overlap dedup: one defect per >DEDUP_OVERLAP overlapping group ----
+    defect_boxes = dedup_overlapping(defect_boxes)
 
     counts = {k: len(v) for k, v in defect_boxes.items()}
     return defect_boxes, counts
@@ -535,7 +596,7 @@ def draw_boxes(img, defect_boxes):
             box_center_x = (x1 + x2) / 2
 
             distance_mm = abs(
-                ((box_center_x - center_x) / float(w)) * 300
+                ((box_center_x - center_x) / float(w)) * FRAME_WIDTH_MM
             )
 
             side_prefix = "OS" if box_center_x < center_x else "DS"
@@ -558,13 +619,18 @@ def draw_boxes(img, defect_boxes):
                 label += "]"
 
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                        # keep the label fully inside the frame (defects at OS/DS edges)
+            lw = tw + 10
+            lx = max(0, min(x1, w - lw))
+            if y1 - th - 16 >= 0:              # room above the box
+                text_y = y1 - 10
+            elif y2 + th + 16 <= h:            # else below the box
+                text_y = y2 + th + 10
+            else:                              # else inside, top of box
+                text_y = max(th + 6, y1 + th + 6)
 
-            text_y = max(25, y1 - 10)
-
-            cv2.rectangle(img, (x1, text_y - th - 6), (x1 + tw + 10, text_y + 4), color, -1)
-
-            cv2.putText(img, label, (x1 + 5, text_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.rectangle(img, (lx, text_y - th - 6), (lx + lw, text_y + 4), color, -1)
+            cv2.putText(img, label, (lx + 5, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     return img
 
@@ -750,6 +816,12 @@ def process_images(cycle_uid, coil_id, cam_path, image_items, model, cam_serial,
                 else:
                     masked_img, labels = model.run_inference(img)
                 infer_time = time.time() - t1
+
+                # cv2.imwrite(
+                #     f"{TEMP_PATH}/{LOCATION}/{cam_serial}_masked.jpg",
+                #     masked_img,
+                #     [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                # )
 
                 # ---- perf accounting (debug only) ----
                 frames_done += 1
@@ -1341,11 +1413,11 @@ def orphan_scheduler(base, orphan_alloc, orphan_pool, mq_obj):
 def _build_model(tag):
     return MASKRCNN(
         tag,
-        os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_101_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_20AUG"),
+        os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_23SEPT"),
         "model_final.pth",
-        0.80,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_20AUG/TALOJA_MODEL_20AUG.json"),
+        0.50,
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_23SEPT/TALOJA_MODEL_23SEPT.json"),
         False,
         GPU_ID=0
     )

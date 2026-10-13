@@ -72,6 +72,12 @@ WS_CLEAN_SYM_MIN   = float(os.environ.get("WS_CLEAN_SYM_MIN", "0.90"))
 # below this aspect ratio the spot is labelled CIRCULAR instead of OVAL
 WS_AR_CIRCLE       = float(os.environ.get("WS_AR_CIRCLE", "1.15"))
 
+# orientation gate: max tilt of the MAJOR axis away from the rolling
+# direction (vertical in the frame), in degrees. 0 = disabled (default,
+# preserves current verdicts). Real white spots are elongated along the
+# rolling direction; recommended 30 once tilt distributions are checked.
+WS_TILT_MAX        = float(os.environ.get("WS_TILT_MAX", "0"))
+
 # elliptical-outline gates
 WS_ELLIPSE_IOU_MIN = float(os.environ.get("WS_ELLIPSE_IOU_MIN", "0.85"))
 WS_SOLIDITY_MIN    = float(os.environ.get("WS_SOLIDITY_MIN", "0.92"))
@@ -226,6 +232,11 @@ def analyze_polygon_shape(polygon, mm_per_px=None):
 
         (ecx, ecy), (d1, d2), angle = cv2.fitEllipse(cnt)
         major, minor = max(d1, d2), min(d1, d2)
+        # fitEllipse's angle belongs to d1, NOT the major axis. Re-express it
+        # as the MAJOR-axis angle so (major, minor, maj_angle) is consistent
+        # for drawing. iou/symmetry below keep using the raw (d1, d2, angle).
+        maj_angle = (angle if d1 >= d2 else angle + 90.0) % 180.0
+        tilt_v = abs(90.0 - maj_angle)   # 0 = vertical (rolling dir), 90 = across strip
         if minor < 1.0:
             return {"shape": "IRREGULAR", "ok": False, "why": "degenerate"}
 
@@ -242,8 +253,8 @@ def analyze_polygon_shape(polygon, mm_per_px=None):
         ar_ceiling = WS_AR_MAX_CLEAN if is_clean else WS_AR_MAX
 
         out = {
-            "ell":    [round(ecx, 1), round(ecy, 1),
-                       round(major, 1), round(minor, 1), round(angle, 1)],
+            "ell":    [round(ecx, 1), round(ecy, 1), round(major, 1), round(minor, 1), round(maj_angle, 1)],
+            "tilt":   round(tilt_v, 1),
             "ar":     round(ar, 2),
             "ar_max": round(ar_ceiling, 2),
             "clean":  bool(is_clean),
@@ -264,6 +275,8 @@ def analyze_polygon_shape(polygon, mm_per_px=None):
             out.update(shape="IRREGULAR", ok=False, why="outline")
         elif sym_major < WS_SYM_MAJOR_MIN or sym_minor < WS_SYM_MINOR_MIN:
             out.update(shape="ASYMMETRIC", ok=False, why="sym")
+        elif WS_TILT_MAX > 0 and ar > WS_AR_CIRCLE and tilt_v > WS_TILT_MAX:
+            out.update(shape="HORIZONTAL", ok=False, why="tilt")
         elif ar <= WS_AR_CIRCLE:
             out.update(shape="CIRCULAR", ok=True)
         else:
