@@ -164,7 +164,7 @@ def fetch_history_data(request):
     queryset = DEFECTS_HISTORY.objects.filter(
         create_time__date__gte=start_dt,
         create_time__date__lte=end_dt
-    ).order_by("-create_time")
+    ).order_by("-coil_id")
 
     if coil_id:
         queryset = queryset.filter(coil_id__icontains=coil_id)

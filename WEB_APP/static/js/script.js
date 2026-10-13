@@ -15,7 +15,7 @@ const MAP_BUCKET_M     = 1;     // coil map: 1 dot per type per metre at 1x zoom
 const MAP_WIDTH_BIN_MM = 10;    // coil map: same-type defects within a 10 mm width band share that dot
 
 // coil map: per-type minimum confidence (%) to be shown. Types not listed show at any score.
-const MAP_MIN_CONF = { W: 50, O: 90 };
+const MAP_MIN_CONF = { W: 90, O: 90 };
 
 function passesMapConf(d) {
     const min = MAP_MIN_CONF[d.type];
