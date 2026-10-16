@@ -29,6 +29,111 @@ DEFECT_LABELS = {
     "V": "V",          # keep for legacy rows written before the rename
 }
 
+# =========================================================================
+# Display rule: per-type minimum confidence (%) for a defect to be SHOWN and
+# COUNTED. Types not listed count at any score.
+# MUST match MAP_MIN_CONF in static/js/script.js (coil maps, live tiles,
+# details modal) - change both together.
+# =========================================================================
+MAP_MIN_CONF = {"W": 90, "O": 90}
+DEFECT_TYPES = ["O", "W", "D", "S", "C"]
+
+
+def _passes_conf(dtype, c):
+    """Same as passesMapConf() in script.js."""
+    min_c = MAP_MIN_CONF.get(dtype)
+    if min_c is None:
+        return True
+    try:
+        c = float(c)
+    except (TypeError, ValueError):
+        return False
+    if c != c:                      # NaN
+        return False
+    if c <= 1:                      # tolerate 0-1 scores from older JSONs
+        c *= 100
+    return c >= min_c
+
+
+def count_visible_defects(frames):
+    """Same as countVisibleDefects() in script.js.
+    Returns {"counts": {O,W,D,S,C}, "total": n, "defect_frames": n}."""
+    counts = {k: 0 for k in DEFECT_TYPES}
+    defect_frames = 0
+    for frame in frames or []:
+        in_frame = 0
+        has_arrays = False
+        for dtype in DEFECT_TYPES:
+            items = frame.get(dtype)
+            if not isinstance(items, list):
+                continue
+            has_arrays = True
+            for d in items:
+                if _passes_conf(dtype, (d or {}).get("c")):
+                    counts[dtype] += 1
+                    in_frame += 1
+        if not has_arrays and isinstance(frame.get("t"), dict):
+            for k, v in frame["t"].items():
+                if k in counts:
+                    try:
+                        n = int(v)
+                    except (TypeError, ValueError):
+                        n = 0
+                    counts[k] += n
+                    in_frame += n
+        if in_frame > 0:
+            defect_frames += 1
+    return {"counts": counts, "total": sum(counts.values()), "defect_frames": defect_frames}
+
+
+# json_path -> (key, result). Backed by a small sidecar file next to the
+# cycle JSON, so each cycle JSON is parsed only once (not on every page load).
+_VISIBLE_CACHE = {}
+
+
+def visible_counts_for(json_path):
+    """Visible (display-rule) counts for one cycle, or None if its JSON is gone."""
+    if not json_path:
+        return None
+    try:
+        st = os.stat(json_path)
+    except OSError:
+        return None
+    key = [st.st_mtime_ns, st.st_size, sorted(MAP_MIN_CONF.items())]
+    key = json.loads(json.dumps(key))          # normalise tuples -> lists
+
+    hit = _VISIBLE_CACHE.get(json_path)
+    if hit and hit[0] == key:
+        return hit[1]
+
+    side = (json_path[:-5] if json_path.endswith(".json") else json_path) + ".counts.json"
+    try:
+        with open(side, "r") as fp:
+            cached = json.load(fp)
+        if cached.get("key") == key:
+            _VISIBLE_CACHE[json_path] = (key, cached["result"])
+            return cached["result"]
+    except Exception:
+        pass
+
+    try:
+        with open(json_path, "r") as fp:
+            data = json.load(fp)
+        result = count_visible_defects(data.get("result", []))
+    except Exception:
+        return None
+
+    _VISIBLE_CACHE[json_path] = (key, result)
+    try:
+        tmp = side + ".tmp"
+        with open(tmp, "w") as fp:
+            json.dump({"key": key, "result": result}, fp)
+        os.replace(tmp, side)
+    except Exception:
+        pass                                   # read-only folder: memory cache only
+    return result
+
+
 def to_naive(dt):
     if dt is None:
         return None
@@ -107,23 +212,39 @@ def serve_file(request):
         status=404
     )
     
+# Live Camera Feed: while a coil is being processed, LOGIC writes the annotated
+# frame <cam>_debug.jpg (updated with live.json). Show it while it is fresh;
+# otherwise show CAPTURE's idle preview <cam>.jpg.
+LIVE_IMG_FRESH_SECS = 10
+CAMERA_SERIALS = ["24521939"]
+
+
 def live_ip_camera(request):
     try: 
-        camera_paths = [
-            # "/home/deepali/OMKAR/CODES/TALOJA/SURFACE_INSPECTION_TALOJA/DEBUGS/TEMP_IMG/TALOJA/24521939_debug.jpg",
-            # "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TEMP_IMG/TALOJA/24521939_debug.jpg",
-            "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/TEMP_IMG/TALOJA/24521939.jpg",
-            # "/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/DEBUGS/RAW_IMG/",
-        ]
-        
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        temp_dir = os.path.join(root, "DEBUGS", "TEMP_IMG", "TALOJA")
+
         cameras = []
-        for i, path in enumerate(camera_paths, start=1):
-            if os.path.exists(path):
+        for i, serial in enumerate(CAMERA_SERIALS, start=1):
+            live_path = os.path.join(temp_dir, f"{serial}_debug.jpg")
+            idle_path = os.path.join(temp_dir, f"{serial}.jpg")
+            path, source = None, None
+            try:
+                if os.path.exists(live_path) and \
+                        (timezone.now().timestamp() - os.path.getmtime(live_path)) < LIVE_IMG_FRESH_SECS:
+                    path, source = live_path, "live"
+            except OSError:
+                pass
+            if path is None and os.path.exists(idle_path):
+                path, source = idle_path, "idle"
+
+            if path:
                 cameras.append({
                     "camera_id": i,
                     "camera_name": f"Camera {i}",
                     "image_url": f'/api/serve-file?file={path}&t={timezone.now().timestamp()}',
                     "has_image": True,
+                    "source": source,
                     "status": "online"
                 })
             else:
@@ -147,7 +268,7 @@ def live_ip_camera(request):
 def fetch_history_data(request):
 
     page     = int(request.GET.get("page", 1))
-    per_page = int(request.GET.get("per_page", 15))
+    per_page = int(request.GET.get("per_page", 17))
 
     start_date = request.GET.get("start_date")
     end_date   = request.GET.get("end_date")
@@ -164,7 +285,7 @@ def fetch_history_data(request):
     queryset = DEFECTS_HISTORY.objects.filter(
         create_time__date__gte=start_dt,
         create_time__date__lte=end_dt
-    ).order_by("-coil_id")
+    ).order_by("-create_time")
 
     if coil_id:
         queryset = queryset.filter(coil_id__icontains=coil_id)
@@ -203,6 +324,14 @@ def fetch_history_data(request):
 
             except Exception:
                 pass
+
+        # Same display rule as the maps / details modal (MAP_MIN_CONF).
+        # Falls back to the stored DB summary if the cycle JSON is gone.
+        vis = visible_counts_for(row.json_path)
+        if vis is not None:
+            total_defects = vis["total"]
+            total_defect_frames = vis["defect_frames"]
+            defect_summary = {k: v for k, v in vis["counts"].items() if v > 0}
 
         summary_text = ", ".join(
             f"{DEFECT_LABELS[k]}: {v}" for k, v in defect_summary.items()
@@ -315,7 +444,8 @@ def download_history_data(request):
         "TOTAL_FRAMES",
         "TOTAL_DEFECT_FRAMES",
         "TOTAL_DEFECTS",
-        "V",
+        "O",
+        "W",
         "D",
         "S",
         "C"
@@ -325,7 +455,7 @@ def download_history_data(request):
         total_frames = 0
         total_defects = 0
         total_defect_frames = 0
-        counts = {"V": 0, "D": 0, "S": 0, "C": 0}
+        counts = {k: 0 for k in DEFECT_TYPES}
 
         if row.defect_details:
             try:
@@ -340,11 +470,18 @@ def download_history_data(request):
                     ) or 0
                 )
 
-                for key in ["V", "D", "S", "C"]:
+                for key in DEFECT_TYPES:
                     counts[key] = int(summary.get(key, 0) or 0)
 
             except Exception:
                 pass
+
+        # same display rule as the history table / maps
+        vis = visible_counts_for(row.json_path)
+        if vis is not None:
+            total_defects = vis["total"]
+            total_defect_frames = vis["defect_frames"]
+            counts = dict(vis["counts"])
 
         writer.writerow([
             row.create_time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -353,7 +490,8 @@ def download_history_data(request):
             total_frames,
             total_defect_frames,
             total_defects,
-            counts["V"],
+            counts["O"],
+            counts["W"],
             counts["D"],
             counts["S"],
             counts["C"]

@@ -15,6 +15,8 @@ const MAP_BUCKET_M     = 1;     // coil map: 1 dot per type per metre at 1x zoom
 const MAP_WIDTH_BIN_MM = 10;    // coil map: same-type defects within a 10 mm width band share that dot
 
 // coil map: per-type minimum confidence (%) to be shown. Types not listed show at any score.
+// Also used for every defect COUNT (live tiles, details modal, history table).
+// MUST match MAP_MIN_CONF in api/views.py (history table + CSV) - change both together.
 const MAP_MIN_CONF = { W: 90, O: 90 };
 
 function passesMapConf(d) {
@@ -24,6 +26,33 @@ function passesMapConf(d) {
     if (isNaN(c)) return false;
     if (c <= 1) c *= 100;          // tolerate 0-1 scores from older JSONs
     return c >= min;
+}
+
+// Dashboard tiles: count defects per type using the SAME rule as the coil map.
+// Per-defect arrays (frame.W = [{c, ...}]) carry the confidence; frame.t does
+// not, so it is only used for old JSONs that have no arrays (counted as-is).
+function countVisibleDefects(frames) {
+    const counts = { O: 0, W: 0, D: 0, S: 0, C: 0 };
+    let defFrames = 0;
+    (frames || []).forEach(frame => {
+        let inFrame = 0;
+        let hasArrays = false;
+        Object.keys(counts).forEach(type => {
+            if (!Array.isArray(frame[type])) return;
+            hasArrays = true;
+            frame[type].forEach(d => {
+                if (passesMapConf({ type, confidence: d.c })) { counts[type]++; inFrame++; }
+            });
+        });
+        if (!hasArrays && frame.t && typeof frame.t === "object") {
+            Object.entries(frame.t).forEach(([k, v]) => {
+                if (counts[k] !== undefined) { counts[k] += Number(v) || 0; inFrame += Number(v) || 0; }
+            });
+        }
+        if (inFrame > 0) defFrames++;
+    });
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    return { counts, total, defFrames };
 }
 let defectNavList  = [];
 let defectNavIndex = -1;
@@ -842,16 +871,14 @@ function updateSIDashboard(data) {
     document.getElementById("siPosition").innerText = `${((data.current_position_mm || 0) / 1000).toFixed(0)} m`;
     document.getElementById("siUpdated").innerText = data.last_updated ? new Date(data.last_updated).toLocaleTimeString() : "--";
 
-    // Stats
+    // Stats + defect breakdown: same confidence rule as the coil map (MAP_MIN_CONF),
+    // so the tiles always match the dots on the map
+    const vis = countVisibleDefects(data.result);
+    const typeCounts = vis.counts;
     document.getElementById("siStatFrames").innerText = data.total_frames || 0;
-    document.getElementById("siStatDefects").innerText = data.total_defects || 0;
-    document.getElementById("siStatDefFrames").innerText = data.total_defective_frames || 0;
+    document.getElementById("siStatDefects").innerText = vis.total;
+    document.getElementById("siStatDefFrames").innerText = vis.defFrames;
 
-    // Defect breakdown
-    const typeCounts = { O: 0,  W: 0, D: 0, S: 0, C: 0 };
-    (data.result || []).forEach(frame => {
-        Object.entries(frame.t || {}).forEach(([k, v]) => { if (typeCounts[k] !== undefined) typeCounts[k] += v; });
-    });
     document.getElementById("siStatO").innerText = typeCounts.O;
     document.getElementById("siStatW").innerText = typeCounts.W;
     document.getElementById("siStatD").innerText = typeCounts.D;
@@ -893,7 +920,11 @@ function updateCameraImages() {
                             slot.innerHTML = "";
                             slot.appendChild(img);
                         }
-                        img.src = `${cam.image_url}?t=${Date.now()}`;
+                        // skip while the previous frame is still loading (no request pile-up)
+                        if (img.dataset.loading === "1") return;
+                        img.dataset.loading = "1";
+                        img.onload = img.onerror = () => { img.dataset.loading = "0"; };
+                        img.src = `${cam.image_url}&t=${Date.now()}`;
                     } else {
                         slot.innerHTML = "No Camera Selected";
                     }
@@ -1088,29 +1119,13 @@ function showRunDetails(data, meta) {
     const rdLenEl = document.getElementById("rdCoilLen");
     if (rdLenEl) rdLenEl.innerText = `${rdTotalKm.toFixed(1)} km total`;
 
-    // Stats tiles
-    document.getElementById("rdStatFrames").innerText   = data.total_frames            || 0;
-    document.getElementById("rdStatDefects").innerText  = data.total_defects           || 0;
-    document.getElementById("rdStatDefFrames").innerText = data.total_defective_frames || 0;
-
-    // Per-type counts from frame.t summaries
-    const tc = { O: 0, W: 0, D: 0, S: 0, C: 0 };
-    (data.result || []).forEach(frame => {
-        // Format 1: frame.t = { V: 3, D: 1 }
-        if (frame.t && typeof frame.t === "object") {
-            Object.entries(frame.t).forEach(([k, v]) => {
-                if (tc[k] !== undefined) tc[k] += Number(v) || 0;
-            });
-        }
-        // Format 2: frame["V"] = [{pos_mm, c}, ...] ? same as live.json / prepareData() reads
-        else {
-            ["O", "W", "D", "S", "C"].forEach(type => {
-                if (frame[type] && Array.isArray(frame[type])) {
-                    tc[type] += frame[type].length;
-                }
-            });
-        }
-    });
+    // Stats tiles + per-type counts: same confidence rule as the coil map
+    // (MAP_MIN_CONF), so the tiles match the map and the history table
+    const rdVis = countVisibleDefects(data.result);
+    const tc = rdVis.counts;
+    document.getElementById("rdStatFrames").innerText   = data.total_frames || 0;
+    document.getElementById("rdStatDefects").innerText  = rdVis.total;
+    document.getElementById("rdStatDefFrames").innerText = rdVis.defFrames;
     document.getElementById("rdStatO").innerText = tc.O;
     document.getElementById("rdStatW").innerText = tc.W;
     document.getElementById("rdStatD").innerText = tc.D;
@@ -1259,7 +1274,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Polling
     setInterval(fetchSystemStatus, 5000);
     setInterval(fetchCurrentStatus, 5000);
-    setInterval(updateCameraImages, 2000);
+    setInterval(updateCameraImages, 1000);   // live annotated frame updates ~1/s
 
     // Auto-refresh after 30min inactivity
     let lastActivity = Date.now();

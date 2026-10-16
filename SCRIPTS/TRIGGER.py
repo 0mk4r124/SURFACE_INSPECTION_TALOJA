@@ -102,11 +102,11 @@ def main():
                     roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
                     conn = getDBconn()
                     coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
-                    if not (("LPHU" in coil_id) or ("LPML" in coil_id) or ("STCL" in coil_id) or ("STCS" in coil_id)): 
-                         print(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS | mill_speed = {mill_speed} | width = {width}")    
-                         if coil_id != last_coil_id: logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS")        
-                         last_coil_id = coil_id
-                         continue
+                    # if not (("LPHU" in coil_id) or ("LPML" in coil_id) or ("STCL" in coil_id) or ("STCS" in coil_id)): 
+                    #      print(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS | mill_speed = {mill_speed} | width = {width}")    
+                    #      if coil_id != last_coil_id: logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS")        
+                    #      last_coil_id = coil_id
+                    #      continue
                     last_coil_id = coil_id
                     mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()} | width = {width}")

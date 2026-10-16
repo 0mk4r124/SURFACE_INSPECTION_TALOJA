@@ -28,7 +28,7 @@ CAMERA_CONFIGS = {
     "24521939": {
         # ------------------------------------------------------------------
         # EXPOSURE controls motion blur. FRAME_RATE does not.
-        # At 70 fps the frame period is 14286 us, so even a 5 us exposure has
+        # At 30 fps the frame period is 33333 us, so even a 5 us exposure has
         # zero effect on achievable fps - the only cost of going shorter is light.
         #
         # Rim speed = pi * D * RPM / 60.  Worst case D=1400mm @ 1000rpm = 73.3 m/s.
@@ -56,8 +56,8 @@ CAMERA_CONFIGS = {
         #
         # Move down ONE ROW AT A TIME and check p99.9 stays near its old value.
         # ------------------------------------------------------------------
-        "EXPOSURE": 350.0,          # paired with GAIN below - do not change alone
-        "GAIN": 17.0,                # dB. 6=2x, 9.5=3x, 12=4x, 15.6=6x
+        "EXPOSURE": 250.0,          # paired with GAIN below - do not change alone
+        "GAIN": 19.9,                # dB. 6=2x, 9.5=3x, 12=4x, 15.6=6x, 19.9=~9.9x (was 350us @ 17.0dB)
         "GAMMA_ENABLE": False,      # linear response for inspection
         # ------------------------------------------------------------------
         # BINNING MUST STAY 1/1.
@@ -76,13 +76,15 @@ CAMERA_CONFIGS = {
         "STROBE_SOURCE": "ExposureActive",
         "STROBE_INVERT": False,
 
-        "FRAME_RATE": 70.0,
+        # 30 fps: matches what SINGLE_LIVE_LOGIC can infer in real time
+        # (was 70.0). Each frame now covers ~2.3x more strip length.
+        "FRAME_RATE": 30.0,
         "PIXEL_FORMAT": "BayerRG8",
         "PACKET_SIZE": 7000,
         "PACKET_DELAY": 10,
         "THROUGHPUT": 700000000,
         "BUFFER_MODE": "OldestFirst",   # never silently drop frames
-        "BUFFER_COUNT": 300,            # ~1.5 GB pinned, ~4.3 s slack @ 70 fps
+        "BUFFER_COUNT": 300,            # ~1.5 GB pinned, ~10 s slack @ 30 fps
     },
 }
 
@@ -99,7 +101,7 @@ db_host = os.environ.get('db_host', "127.0.0.1")
 db_name = os.environ.get('db_name', "SURFACE_INSPECTION_TALOJA")
 
 # ---------------------------------------------------------------------------
-# Capture throughput tuning (sustained 70 fps)
+# Capture throughput tuning (sustained 30 fps, see FRAME_RATE)
 # ---------------------------------------------------------------------------
 # JPEG_QUALITY 95 is EXACTLY what cv2.imwrite() used before, so stored image
 # quality is bit-for-bit unchanged by this refactor.
@@ -241,7 +243,7 @@ def enqueue_save(path, arr, pf, logger):
         if n % 50 == 1:
             logger.error(
                 f"SAVE QUEUE FULL - {n} frames dropped so far. "
-                f"Disk cannot sustain 70 fps with {SAVE_WORKERS} workers. "
+                f"Disk cannot sustain the camera frame rate with {SAVE_WORKERS} workers. "
                 f"Check that {RAW_PATH} is on NVMe/SSD."
             )
         return False

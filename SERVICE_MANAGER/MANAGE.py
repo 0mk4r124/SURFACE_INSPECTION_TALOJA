@@ -45,8 +45,10 @@ SERVICES = {
     "Trigger": f"{BASE_FILE_PATH}/SCRIPTS/TRIGGER.py",
     "Writer": f"{BASE_FILE_PATH}/SCRIPTS/WRITER.py",
     "Health": f"{BASE_FILE_PATH}/SCRIPTS/HEALTH_MONITOR.py",
-    "Logic (Orphan)": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC_ORPHAN.py",
-    "Logic (Live)": f"{BASE_FILE_PATH}/SCRIPTS/LOGIC_LIVE.py",
+    # ONE inference service (live coil first, backlog coils in spare time).
+    # Replaces "Logic (Orphan)" LOGIC_ORPHAN.py + "Logic (Live)" LOGIC_LIVE.py
+    # - do not run those together with this one.
+    "Logic": f"{BASE_FILE_PATH}/SCRIPTS/SINGLE_LIVE_LOGIC.py",
     "Web App": f"{BASE_FILE_PATH}/WEB_APP/manage.py runserver 0.0.0.0:8000",
 }
 
