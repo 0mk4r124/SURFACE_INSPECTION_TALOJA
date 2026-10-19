@@ -343,6 +343,7 @@ def fetch_history_data(request):
             "coil_id":           row.coil_id,
             "cycle_uid":         row.cycle_uid,
             "total_defects":     total_defects,
+            "white_spots":       defect_summary.get("W", 0),
             "total_frames":      total_frames,
             "total_defect_frames": total_defect_frames,
             "defect_summary":    summary_text,

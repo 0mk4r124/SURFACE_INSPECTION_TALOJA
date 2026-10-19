@@ -1302,3 +1302,18 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     display: none;
 }
+
+/* ---- History table: separate WHITE SPOTS column ----
+   grey by default, light pink-red when over ALARM_LIMITS.W (script.js) */
+#HISTORY_table td.si-ws-cell {
+    --bs-table-bg: #eceef1;
+    --bs-table-accent-bg: transparent;
+    background-color: #eceef1 !important;
+    font-weight: 700;
+    color: #3a4656;
+}
+#HISTORY_table td.si-ws-cell.si-ws-over {
+    --bs-table-bg: #ffd6da;
+    background-color: #ffd6da !important;
+    color: #b0161f;
+}

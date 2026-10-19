@@ -1202,12 +1202,16 @@ function populateHistoryTable(data) {
     const tbody = document.getElementById("History_body");
     tbody.innerHTML = "";
     data.forEach(row => {
+        // White spots get their own column; pink-red when over the dashboard alarm limit
+        const ws = Number(row.white_spots) || 0;
+        const wsOver = ws > ALARM_LIMITS.W;
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>${row.sno}</td>
             <td>${row.datetime}</td>
             <td>${row.coil_id}</td>
             <td>${row.total_defects}</td>
+            <td class="si-ws-cell${wsOver ? " si-ws-over" : ""}"${wsOver ? ` title="Above limit ${ALARM_LIMITS.W}"` : ""}>${ws}</td>
             <td>${row.total_frames}</td>
             <td>${row.total_defect_frames}</td>
             <td>${row.defect_summary}</td>
