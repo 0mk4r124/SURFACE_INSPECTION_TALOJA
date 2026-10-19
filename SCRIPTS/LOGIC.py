@@ -479,7 +479,9 @@ def process_labels(labels, img_shape):
         except:
             continue
 
-        # normalize + filter 
+        cls = None   # reset per label: a sub-threshold label must NOT inherit the previous label's class
+
+        # normalize + filter
         if "OIL" in raw_cls:
             if score > 0.80:
                 cls = "O"
