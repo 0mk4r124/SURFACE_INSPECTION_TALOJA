@@ -560,6 +560,64 @@ def health_status(request):
     })
 
 @csrf_exempt
+def get_recent_coils(request):
+    """Last completed coils for the dashboard's stacked coil maps.
+
+    Light-weight: one DB query + the cached visible counts (no full JSON is
+    sent). The frontend fetches a coil's defect map via get_run_details only
+    when the cycle_uid changes.
+
+    GET params:
+      limit   - how many coils (default 2, max 5)
+      exclude - cycle_uid to skip (the coil currently being processed)
+    """
+    try:
+        limit = max(1, min(5, int(request.GET.get("limit", 2))))
+    except (TypeError, ValueError):
+        limit = 2
+    exclude = (request.GET.get("exclude") or "").strip()
+
+    # cycle_uid is ROLL_YYYYMMDDHHMMSS -> sorts in capture (line) order
+    queryset = DEFECTS_HISTORY.objects.all().order_by("-cycle_uid", "-create_time")
+    if exclude:
+        queryset = queryset.exclude(cycle_uid=exclude)
+
+    coils = []
+    for row in queryset[:limit]:
+        counts = {k: 0 for k in DEFECT_TYPES}
+        total = 0
+        total_frames = 0
+        if row.defect_details:
+            try:
+                summary = json.loads(row.defect_details)
+                total_frames = int(summary.get("total_frames", 0) or 0)
+                total = int(summary.get("total_defects", 0) or 0)
+                for key in DEFECT_TYPES:
+                    counts[key] = int(summary.get(key, 0) or 0)
+            except Exception:
+                pass
+
+        # same display rule as the maps / history table (MAP_MIN_CONF)
+        vis = visible_counts_for(row.json_path)
+        if vis is not None:
+            counts = dict(vis["counts"])
+            total = vis["total"]
+
+        completed = to_naive(row.create_time)
+        coils.append({
+            "cycle_uid":    row.cycle_uid,
+            "coil_id":      row.coil_id,
+            "completed_at": completed.isoformat() if completed else None,
+            "counts":       counts,
+            "total":        total,
+            "total_frames": total_frames,
+            "json_available": bool(row.json_path and os.path.exists(row.json_path)),
+        })
+
+    return JsonResponse({"coils": coils})
+
+
+@csrf_exempt
 def get_current_status(request):
     # Prefer live.json from DEBUGS/TEMP_JSON if available
     try:

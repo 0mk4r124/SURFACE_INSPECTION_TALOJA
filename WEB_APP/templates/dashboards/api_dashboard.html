@@ -28,10 +28,10 @@
 
     <!-- ABF Tab -->
     <div class="tab-pane fade show active" id="DASHBOARD">
-        <div class="si-dashboard">
-    
-            <!-- STATUS BAR -->
-            <div class="si-status-bar">
+        <div class="si-dashboard si-dual">
+
+            <!-- STATUS BAR: current coil + previous / last coil -->
+            <div class="si-status-bar si-hero">
                 <div class="si-status-left">
                     <div class="si-live-badge" id="siBadge">
                         <span class="si-live-dot"></span>
@@ -42,148 +42,142 @@
                         <span class="si-chip-value si-mono" id="siStatus">IDLE</span>
                     </div>
                     <div class="si-chip">
-                        <span class="si-chip-label">COIL ID</span>
+                        <span class="si-chip-label" id="siIdLabel">COIL ID</span>
                         <span class="si-chip-value si-mono" id="siCoilId">?</span>
                     </div>
-                    <!-- <div class="si-chip">
-                        <span class="si-chip-label">CYCLE UID</span>
-                        <span class="si-chip-value si-mono" id="siCycleUid">?</span>
-                    </div> -->
                 </div>
-                <!-- right-side status removed from top; moved to bottom stats panel -->
+                <div class="si-hero-side">
+                    <span class="si-chip-label" id="siSideLabel">PREVIOUS COIL</span>
+                    <span class="si-hero-side-id si-mono" id="siSideId">--</span>
+                    <span class="si-hero-side-meta" id="siSideMeta"></span>
+                </div>
             </div>
-    
-            <!-- COIL DEFECT MAP (the hero element) -->
-            <div class="si-scanner-section">
-                <div class="si-scanner-header">
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="si-section-label">COIL DEFECT MAP</span>
-                        <span class="si-coil-len" id="siCoilLen">8.5 km total</span>
+
+            <!-- Two coil maps, newest on top.
+                 Processing: 1 = current coil (live.json), 2 = previous completed coil.
+                 Idle:       1 = last completed coil,      2 = the coil before it. -->
+                <!-- COIL MAP 1 -->
+                <div class="si-coil-card si-coil-card-active" id="cmCard1">
+                    <div class="si-coil-head">
+                        <span class="si-coil-tag si-tag-none" id="cmTag1">NO DATA</span>
+                        <span class="si-coil-id si-mono" id="cmCoilId1">--</span>
+                        <span class="si-coil-meta" id="cmMeta1"></span>
                     </div>
-                    <div class="si-legend">
-                        <div class="defect-filters">
-                            <button class="defect-filter-btn active" data-type="O" style="background:#0000ff;">Oil Stain (O)</button>
-                            <button class="defect-filter-btn active" data-type="W" style="background:#808080;">White Spot (W)</button>
-                            <button class="defect-filter-btn active" data-type="S" style="background:#b1b111;">Scoring (S)</button>
-                            <button class="defect-filter-btn active" data-type="D" style="background:#ff0000;">Dent (D)</button>
-                            <button class="defect-filter-btn active" data-type="C" style="background:#00ff00;">Scratch (C)</button>
+                    <div class="si-coil-stats">
+                        <div class="si-ct si-ct-len">
+                            <div class="si-ct-lbl">LENGTH</div>
+                            <div class="si-ct-num" id="cmLen1">0 m</div>
+                        </div>
+                        <div class="si-ct si-ct-total">
+                            <div class="si-ct-lbl">ALL DEFECTS</div>
+                            <div class="si-ct-num" id="cmTotal1">0</div>
+                        </div>
+                        <div class="si-ct si-ct-O" id="cmTileO1">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Oil Stain (O)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmO1">0</div>
+                        </div>
+                        <div class="si-ct si-ct-W" id="cmTileW1">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>White Spot (W)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmW1">0</div>
+                        </div>
+                        <div class="si-ct si-ct-S" id="cmTileS1">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Scoring (S)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmS1">0</div>
+                        </div>
+                        <div class="si-ct si-ct-D" id="cmTileD1">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Dent (D)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmD1">0</div>
+                        </div>
+                        <div class="si-ct si-ct-C" id="cmTileC1">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Scratch (C)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmC1">0</div>
                         </div>
                     </div>
-                </div>
-                <div class="si-canvas-wrap">
-
-
-                    <div id="coilMapWrapper">
-                        <canvas id="coilMap"></canvas>
-                        <div id="mapTooltip"></div>
+                    <div class="si-coil-filters" data-map="1">
+                        <span class="si-filter-label">DEFECT FILTER</span>
+                        <button type="button" class="si-fchip si-fchip-all active" data-type="ALL" aria-pressed="true">All</button>
+                        <button type="button" class="si-fchip active" data-type="O" aria-pressed="true"><span class="si-fdot" style="background:#0000ff;"></span>Oil Stain (O)</button>
+                        <button type="button" class="si-fchip active" data-type="W" aria-pressed="true"><span class="si-fdot" style="background:#808080;"></span>White Spot (W)</button>
+                        <button type="button" class="si-fchip active" data-type="S" aria-pressed="true"><span class="si-fdot" style="background:#b1b111;"></span>Scoring (S)</button>
+                        <button type="button" class="si-fchip active" data-type="D" aria-pressed="true"><span class="si-fdot" style="background:#ff0000;"></span>Dent (D)</button>
+                        <button type="button" class="si-fchip active" data-type="C" aria-pressed="true"><span class="si-fdot" style="background:#00c853;"></span>Scratch (C)</button>
                     </div>
-
-                    <!-- <div class="coilYAxis">
-                        <span>+150</span>
-                        <span>0</span>
-                        <span>-150</span>
-                    </div> -->
-
-                    <div id="coilXAxis">
-                        <span id="coilStart">0 mm</span>
-                        <span id="coilEnd">0 mm</span>
-                    </div>
-
-                    <div id="siCoilTooltip" class="si-tooltip"></div>
-                </div>
-            </div>
-    
-            <!-- STATS ROW removed; stats moved alongside live camera -->
-    
-            <!-- BOTTOM: camera feed + scatter plot -->
-            <div class="si-bottom-row">
-
-                <div class="si-camera-panel">
-                    <div class="si-panel-label">
-                        <span class="si-live-dot-sm"></span>CAMERA FEED
-                    </div>
-                    <div class="si-camera-slot" id="camera-slot-1">
-                        <div class="si-cam-placeholder">
-                            <i class="fas fa-camera fa-2x"></i>
-                            <span>No Signal</span>
+                    <div class="si-coil-mapwrap">
+                        <div class="si-coil-side"><span>DS</span><span>OS</span></div>
+                        <div class="si-coil-canvas">
+                            <canvas id="cmCanvas1"></canvas>
+                            <div class="si-coil-empty" id="cmEmpty1">Waiting for coil data</div>
+                            <div class="si-coil-headmark" id="cmHead1"><span id="cmHeadLbl1">SCANNING</span></div>
                         </div>
                     </div>
-                </div>
-
-                <div class="si-stats-panel">
-                    <div class="si-panel-label">LIVE STATUS</div>
-                    <div class="si-stats-vertical">
-                            <!-- <div class="si-insights">
-                                <div class="si-insight-row"><strong id="ins-top-type">Top: -</strong></div>
-                                <div class="si-insight-row">Last Defect: <span id="ins-last-pos">-</span></div>
-                                <div class="si-insight-row">Avg Severity: <span id="ins-avg-sev">-</span></div>
-                            </div> -->
-
-                            <div class="si-chips-bottom">
-                                <!-- <div class="si-chip">
-                                    <span class="si-chip-label">SPEED</span>
-                                    <span class="si-chip-value si-mono" id="siSpeed">-- m/min</span>
-                                </div> -->
-                                <div class="si-chip">
-                                    <span class="si-chip-label">LENGTH</span>
-                                    <span class="si-chip-value si-mono" id="siPosition">0.000 km</span>
-                                </div>
-                                <!-- <div class="si-chip">
-                                    <span class="si-chip-label">COVERAGE</span>
-                                    <span class="si-chip-value si-mono" id="siCoverage">0.0%</span>
-                                </div> -->
-                                <div class="si-chip">
-                                    <span class="si-chip-label">UPDATED</span>
-                                    <span class="si-chip-value si-mono" id="siUpdated">--</span>
-                                </div>
-                            </div>
-
-                            <div class="si-stat-split d-flex" style="gap:12px;">
-                                <div class="si-stat-left" style="flex:1;">
-                                    <div class="si-stat-tile">
-                                        <div class="si-stat-num si-mono" id="siStatFrames">0</div>
-                                        <div class="si-stat-lbl">FRAMES</div>
-                                    </div>
-                                    <div class="si-stat-tile si-stat-amber">
-                                        <div class="si-stat-num si-mono" id="siStatDefFrames">0</div>
-                                        <div class="si-stat-lbl">DEFECT FRAMES</div>
-                                    </div>
-                                    <div class="si-stat-tile si-stat-red">
-                                        <div class="si-stat-num si-mono" id="siStatDefects">0</div>
-                                        <div class="si-stat-lbl">DEFECTS</div>
-                                    </div>
-                                </div>
-                                <div class="si-stat-right" style="flex:1;">
-                                    <div class="si-stat-types-grid d-flex flex-wrap" style="gap:8px;">
-                                        <div class="si-stat-tile si-stat-type" id="siTypeO" style="flex:1 1 48%;">
-                                            <div class="si-stat-num si-mono" id="siStatO">0</div>
-                                            <div class="si-stat-lbl">Oil Stains</div>
-                                        </div>
-                                        <div class="si-stat-tile si-stat-type" id="siTypeW" style="flex:1 1 48%;">
-                                            <div class="si-stat-num si-mono" id="siStatW">0</div>
-                                            <div class="si-stat-lbl">White Spots</div>
-                                        </div>
-                                        <div class="si-stat-tile si-stat-type" id="siTypeD" style="flex:1 1 48%;">
-                                            <div class="si-stat-num si-mono" id="siStatD">0</div>
-                                            <div class="si-stat-lbl">Dents</div>
-                                        </div>
-                                        <div class="si-stat-tile si-stat-type" id="siTypeS" style="flex:1 1 48%;">
-                                            <div class="si-stat-num si-mono" id="siStatS">0</div>
-                                            <div class="si-stat-lbl">Scoring</div>
-                                        </div>
-                                        <div class="si-stat-tile si-stat-type" id="siTypeC" style="flex:1 1 48%;">
-                                            <div class="si-stat-num si-mono" id="siStatC">0</div>
-                                            <div class="si-stat-lbl">Scratch</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
+                    <div class="si-coil-axis">
+                        <span id="cmStart1">0 m</span>
+                        <span id="cmEnd1">0 m</span>
                     </div>
+                    <div id="cmTip1" class="si-map-tip"></div>
                 </div>
 
-            </div>
-    
+                <!-- COIL MAP 2 -->
+                <div class="si-coil-card" id="cmCard2">
+                    <div class="si-coil-head">
+                        <span class="si-coil-tag si-tag-none" id="cmTag2">NO DATA</span>
+                        <span class="si-coil-id si-mono" id="cmCoilId2">--</span>
+                        <span class="si-coil-meta" id="cmMeta2"></span>
+                    </div>
+                    <div class="si-coil-stats">
+                        <div class="si-ct si-ct-len">
+                            <div class="si-ct-lbl">LENGTH</div>
+                            <div class="si-ct-num" id="cmLen2">0 m</div>
+                        </div>
+                        <div class="si-ct si-ct-total">
+                            <div class="si-ct-lbl">ALL DEFECTS</div>
+                            <div class="si-ct-num" id="cmTotal2">0</div>
+                        </div>
+                        <div class="si-ct si-ct-O" id="cmTileO2">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Oil Stain (O)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmO2">0</div>
+                        </div>
+                        <div class="si-ct si-ct-W" id="cmTileW2">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>White Spot (W)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmW2">0</div>
+                        </div>
+                        <div class="si-ct si-ct-S" id="cmTileS2">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Scoring (S)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmS2">0</div>
+                        </div>
+                        <div class="si-ct si-ct-D" id="cmTileD2">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Dent (D)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmD2">0</div>
+                        </div>
+                        <div class="si-ct si-ct-C" id="cmTileC2">
+                            <div class="si-ct-lbl"><span class="si-ct-dot"></span>Scratch (C)<span class="si-ct-limit"></span></div>
+                            <div class="si-ct-num" id="cmC2">0</div>
+                        </div>
+                    </div>
+                    <div class="si-coil-filters" data-map="2">
+                        <span class="si-filter-label">DEFECT FILTER</span>
+                        <button type="button" class="si-fchip si-fchip-all active" data-type="ALL" aria-pressed="true">All</button>
+                        <button type="button" class="si-fchip active" data-type="O" aria-pressed="true"><span class="si-fdot" style="background:#0000ff;"></span>Oil Stain (O)</button>
+                        <button type="button" class="si-fchip active" data-type="W" aria-pressed="true"><span class="si-fdot" style="background:#808080;"></span>White Spot (W)</button>
+                        <button type="button" class="si-fchip active" data-type="S" aria-pressed="true"><span class="si-fdot" style="background:#b1b111;"></span>Scoring (S)</button>
+                        <button type="button" class="si-fchip active" data-type="D" aria-pressed="true"><span class="si-fdot" style="background:#ff0000;"></span>Dent (D)</button>
+                        <button type="button" class="si-fchip active" data-type="C" aria-pressed="true"><span class="si-fdot" style="background:#00c853;"></span>Scratch (C)</button>
+                    </div>
+                    <div class="si-coil-mapwrap">
+                        <div class="si-coil-side"><span>DS</span><span>OS</span></div>
+                        <div class="si-coil-canvas">
+                            <canvas id="cmCanvas2"></canvas>
+                            <div class="si-coil-empty" id="cmEmpty2">No previous coil</div>
+                            <div class="si-coil-headmark" id="cmHead2"><span id="cmHeadLbl2">SCANNING</span></div>
+                        </div>
+                    </div>
+                    <div class="si-coil-axis">
+                        <span id="cmStart2">0 m</span>
+                        <span id="cmEnd2">0 m</span>
+                    </div>
+                    <div id="cmTip2" class="si-map-tip"></div>
+                </div>
+
         </div>
     
         <!-- hidden legacy compat - keeps existing updateDefectSummary from erroring -->

@@ -10,6 +10,7 @@ urlpatterns = [
     path('get_run_details/', get_run_details, name='get_run_details'),
     path('download_run_json/', download_run_json, name='download_run_json'), 
     path('get_current_status/', get_current_status, name='get_current_status'),
+    path('get_recent_coils/', get_recent_coils, name='get_recent_coils'),
 
     path('health_status/', health_status, name='health_status'),
     path('live-ip-camera', live_ip_camera, name='live-ip-camera'),

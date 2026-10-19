@@ -571,7 +571,9 @@ function openDefectImage(point) {
 
 // ======================== DASHBOARD: CoilMap (optimised) ========================
 class CoilMap {
-    constructor(canvasId, tooltipId, startLabelId = "coilStart", endLabelId = "coilEnd") {
+    constructor(canvasId, tooltipId, startLabelId = "coilStart", endLabelId = "coilEnd", opts = {}) {
+        this.height = Number(opts.height) || 250;   // dashboard maps pass 170; run-details modal keeps 250
+        this.ctxInfo = null;                        // {coilId, cycleUid} set by the dashboard per map
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext("2d");
         this.tooltip = document.getElementById(tooltipId);
@@ -595,7 +597,7 @@ class CoilMap {
 
     resize() {
         this.canvas.width = this.canvas.offsetWidth;
-        this.canvas.height = 250;
+        this.canvas.height = this.height;
         this.render();
     }
 
@@ -803,6 +805,7 @@ class CoilMap {
     }
 
     getContext() {
+        if (this.ctxInfo) return this.ctxInfo;     // dashboard maps: each knows its own coil
         const isRd = this.canvas && this.canvas.id === "rdCoilMap";
         const g = id => (document.getElementById(id)?.innerText || "").trim();
         return {
@@ -823,85 +826,255 @@ class CoilMap {
     }
 }
 
-let coilMap = null;
+let coilMap = null;    // top map    (current coil, or last completed coil when idle)
+let coilMap2 = null;   // bottom map (previous completed coil, or the one before it when idle)
 
-// ======================== DASHBOARD: LIVE STATUS UPDATE ========================
-function updateSIDashboard(data) {
+// ======================== DASHBOARD: DUAL COIL VIEW ========================
+// Red blinking alarm on a defect tile when its (visible) count is OVER the limit.
+// Counts use the same MAP_MIN_CONF rule as the map dots and the history table.
+const ALARM_LIMITS = { O: 5000, W: 300, S: 5000, D: 5000, C: 5000 };
+const DUAL_TYPES   = ["O", "W", "S", "D", "C"];
+const LIVE_STATUSES = ["inprogress", "processing", "running"];
 
-    // Status & coil ID
+const dashSlotKey = { 1: null, 2: null };   // which coil each map is currently showing
+const runDataCache = new Map();             // cycle_uid -> Promise<run JSON | null>
+let dashBusy = false;
+
+function fmtMetres(mm) {
+    return `${Math.round((Number(mm) || 0) / 1000).toLocaleString("en-IN")} m`;
+}
+
+function fmtClock(iso) {
+    if (!iso) return "--";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? "--" : d.toLocaleTimeString();
+}
+
+function maxFrameLengthMm(data) {
+    let maxL = 0;
+    (data && Array.isArray(data.result) ? data.result : []).forEach(f => {
+        const l = Number(f.l);
+        if (!isNaN(l) && l > maxL) maxL = l;
+    });
+    return maxL;
+}
+
+// Full defect map of a completed coil (get_run_details), fetched once per cycle_uid.
+function loadRunData(cycleUid) {
+    if (!runDataCache.has(cycleUid)) {
+        const p = fetch(`/api/get_run_details/?cycle_uid=${encodeURIComponent(cycleUid)}`)
+            .then(r => (r.ok ? r.json() : null))
+            .catch(() => null)
+            .then(d => { if (!d) runDataCache.delete(cycleUid); return d; });   // retry next poll
+        runDataCache.set(cycleUid, p);
+        while (runDataCache.size > 4) runDataCache.delete(runDataCache.keys().next().value);
+    }
+    return runDataCache.get(cycleUid);
+}
+
+// Fill one coil card. info = null -> empty card.
+function renderCoilSlot(n, info, map) {
+    const $ = id => document.getElementById(id);
+    if (!$(`cmCard${n}`) || !map) return;
+
+    const tagEl = $(`cmTag${n}`);
+    const emptyEl = $(`cmEmpty${n}`);
+    const headEl = $(`cmHead${n}`);
+
+    if (!info) {
+        tagEl.textContent = "NO DATA";
+        tagEl.className = "si-coil-tag si-tag-none";
+        $(`cmCoilId${n}`).textContent = "--";
+        $(`cmMeta${n}`).textContent = "";
+        $(`cmLen${n}`).textContent = "0 m";
+        $(`cmTotal${n}`).textContent = "0";
+        DUAL_TYPES.forEach(t => {
+            $(`cm${t}${n}`).textContent = "0";
+            $(`cmTile${t}${n}`).classList.remove("si-ct-alarm");
+            $(`cmTile${t}${n}`).querySelector(".si-ct-limit").textContent = "";
+        });
+        headEl.style.display = "none";
+        emptyEl.textContent = n === 1 ? "Waiting for coil data" : "No previous coil";
+        emptyEl.style.display = "flex";
+        map.ctxInfo = null;
+        if (dashSlotKey[n] !== null) { map.update({ result: [] }); dashSlotKey[n] = null; }
+        return;
+    }
+
+    tagEl.textContent = info.tag;
+    tagEl.className = `si-coil-tag ${info.tagClass}`;
+    $(`cmCoilId${n}`).textContent = info.coilId || "?";
+    $(`cmMeta${n}`).textContent = info.meta || "";
+    $(`cmLen${n}`).textContent = fmtMetres(info.lengthMm);
+    $(`cmTotal${n}`).textContent = info.total;
+
+    DUAL_TYPES.forEach(t => {
+        const v = Number(info.counts[t]) || 0;
+        const over = v > ALARM_LIMITS[t];
+        const tile = $(`cmTile${t}${n}`);
+        $(`cm${t}${n}`).textContent = v;
+        tile.classList.toggle("si-ct-alarm", over);
+        tile.querySelector(".si-ct-limit").textContent = over ? ` · LIMIT ${ALARM_LIMITS[t]}` : "";
+    });
+
+    headEl.style.display = info.live ? "block" : "none";
+    if (info.live) $(`cmHeadLbl${n}`).textContent = `SCANNING · ${fmtMetres(info.lengthMm)}`;
+
+    map.ctxInfo = { coilId: info.coilId || "", cycleUid: info.cycleUid || "" };
+
+    if (info.mapData) {
+        emptyEl.style.display = "none";
+        // live map refreshes every poll (as before); a completed coil only when it changes
+        if (info.live || dashSlotKey[n] !== info.key) {
+            map.update(info.mapData);
+            dashSlotKey[n] = info.key;
+        }
+    } else {
+        emptyEl.textContent = info.mapMissing ? "Defect map file not available" : "Loading defect map...";
+        emptyEl.style.display = "flex";
+        if (dashSlotKey[n] !== null) { map.update({ result: [] }); dashSlotKey[n] = null; }
+    }
+}
+
+// Card info for a completed coil from get_recent_coils (+ its run JSON for the map).
+async function completedCoilInfo(coil, tag, tagClass) {
+    if (!coil) return null;
+    const run = coil.json_available ? await loadRunData(coil.cycle_uid) : null;
+    return {
+        tag, tagClass,
+        coilId: coil.coil_id,
+        cycleUid: coil.cycle_uid,
+        meta: `Completed ${fmtClock(coil.completed_at)}`,
+        lengthMm: run ? (Number(run.coil_length_mm) || maxFrameLengthMm(run)) : 0,
+        counts: coil.counts || {},
+        total: Number(coil.total) || 0,
+        live: false,
+        mapData: run,
+        mapMissing: !coil.json_available,
+        key: `done:${coil.cycle_uid}`
+    };
+}
+
+function setStatusBar(data, isLive, recent) {
     const statusEl = document.getElementById("siStatus");
     if (statusEl) {
-        statusEl.textContent = (data.status || "IDLE").toUpperCase();
+        const st = String(data.status || "").toLowerCase();
         statusEl.className = "si-chip-value si-mono";
-        const clsMap = { processing: "si-status-processing", idle: "si-status-idle", complete: "si-status-complete", error: "si-status-error" };
-        if (clsMap[(data.status || "").toLowerCase()]) statusEl.classList.add(clsMap[(data.status || "").toLowerCase()]);
-    }
-    document.getElementById("siCoilId").innerText = data.coil_id || "?";
-
-    // ----- FIXED TOTAL LENGTH DISPLAY -----
-    let totalLengthKm = 0;
-    let coilLengthMm = Number(data.coil_length_mm);
-    
-    if (!isNaN(coilLengthMm) && coilLengthMm > 0) {
-        totalLengthKm = coilLengthMm / 1000000;
-    } else {
-        // Fallback: compute max length from defect positions (field 'l')
-        let maxPos = 0;
-        if (Array.isArray(data.result)) {
-            data.result.forEach(item => {
-                let pos = Number(item.l);
-                if (!isNaN(pos) && pos > maxPos) maxPos = pos;
-            });
+        if (isLive) {
+            statusEl.textContent = (data.status || "INPROGRESS").toUpperCase();
+            statusEl.classList.add("si-status-processing");
+        } else if (st === "error") {
+            statusEl.textContent = "ERROR";
+            statusEl.classList.add("si-status-error");
+        } else {
+            statusEl.textContent = "WAITING FOR COIL";
+            statusEl.classList.add("si-status-idle");
         }
-        totalLengthKm = maxPos / 1000000;
-    }
-    
-    const lengthElem = document.getElementById("siCoilLen");
-    if (lengthElem) {
-        lengthElem.innerText = `${totalLengthKm.toFixed(1)} km total`;
     }
 
-    // Speed & position
-    let speedText = "?";
-    if (data.total_frames && data.start_time) {
-        const elapsed = Math.max(1, (Date.now() - new Date(data.start_time).getTime()) / 1000);
-        speedText = `${(data.total_frames / elapsed).toFixed(2)} fps`;
-    } else if (data.speed_mpm !== undefined) speedText = `${data.speed_mpm} m/min`;
-    // document.getElementById("siSpeed").innerText = speedText;
-    document.getElementById("siPosition").innerText = `${((data.current_position_mm || 0) / 1000).toFixed(0)} m`;
-    document.getElementById("siUpdated").innerText = data.last_updated ? new Date(data.last_updated).toLocaleTimeString() : "--";
+    const idLabel = document.getElementById("siIdLabel");
+    const idEl = document.getElementById("siCoilId");
+    if (isLive) {
+        if (idLabel) idLabel.textContent = "COIL ID";
+        if (idEl) idEl.textContent = data.coil_id || "?";
+    } else {
+        if (idLabel) idLabel.textContent = "LAST COMPLETED";
+        if (idEl) idEl.textContent = (recent[0] && recent[0].coil_id) || "--";
+    }
 
-    // Stats + defect breakdown: same confidence rule as the coil map (MAP_MIN_CONF),
-    // so the tiles always match the dots on the map
-    const vis = countVisibleDefects(data.result);
-    const typeCounts = vis.counts;
-    document.getElementById("siStatFrames").innerText = data.total_frames || 0;
-    document.getElementById("siStatDefects").innerText = vis.total;
-    document.getElementById("siStatDefFrames").innerText = vis.defFrames;
+    const side = isLive ? recent[0] : recent[1];
+    const sideLabel = document.getElementById("siSideLabel");
+    const sideId = document.getElementById("siSideId");
+    const sideMeta = document.getElementById("siSideMeta");
+    if (sideLabel) sideLabel.textContent = isLive ? "PREVIOUS COIL" : "LAST COIL";
+    if (sideId) sideId.textContent = side ? (side.coil_id || "?") : "--";
+    if (sideMeta) sideMeta.textContent = side
+        ? `Completed ${fmtClock(side.completed_at)} · ${Number(side.total) || 0} defects`
+        : "";
+}
 
-    document.getElementById("siStatO").innerText = typeCounts.O;
-    document.getElementById("siStatW").innerText = typeCounts.W;
-    document.getElementById("siStatD").innerText = typeCounts.D;
-    document.getElementById("siStatS").innerText = typeCounts.S;
-    document.getElementById("siStatC").innerText = typeCounts.C;
+async function updateSIDashboard(data, recent, isLive) {
+    recent = Array.isArray(recent) ? recent : [];
+    setStatusBar(data, isLive, recent);
 
-    // Update coil map
-    if (coilMap) coilMap.update(data);
+    let top, bottom;
+    if (isLive) {
+        // same confidence rule as the coil map (MAP_MIN_CONF): tiles always match the dots
+        const vis = countVisibleDefects(data.result);
+        top = {
+            tag: "● CURRENT · IN PROGRESS", tagClass: "si-tag-live",
+            coilId: data.coil_id, cycleUid: data.cycle_uid,
+            meta: `Updated ${fmtClock(data.last_updated)}`,
+            lengthMm: Number(data.current_position_mm) || 0,
+            counts: vis.counts, total: vis.total,
+            live: true, mapData: data, key: `live:${data.cycle_uid || ""}`
+        };
+        bottom = await completedCoilInfo(recent[0], "PREVIOUS · COMPLETED", "si-tag-done");
+    } else {
+        top = await completedCoilInfo(recent[0], "COMPLETED", "si-tag-done");
+        bottom = await completedCoilInfo(recent[1], "LAST COIL", "si-tag-last");
+    }
+
+    renderCoilSlot(1, top, coilMap);
+    renderCoilSlot(2, bottom, coilMap2);
 }
 
 async function fetchCurrentStatus() {
+    if (dashBusy) return;            // previous poll still running (slow JSON load)
+    dashBusy = true;
     try {
         const resp = await fetch("/api/get_current_status/");
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         const data = await resp.json();
-        updateSIDashboard(data);
+        const isLive = LIVE_STATUSES.includes(String(data.status || "").toLowerCase());
+
+        let recent = [];
+        try {
+            let url = "/api/get_recent_coils/?limit=2";
+            if (isLive && data.cycle_uid) url += `&exclude=${encodeURIComponent(data.cycle_uid)}`;
+            const r = await fetch(url);
+            if (r.ok) recent = (await r.json()).coils || [];
+        } catch (e) {
+            console.error("get_recent_coils error:", e);
+        }
+
+        await updateSIDashboard(data, recent, isLive);
         // Legacy hidden fields (for any old code)
         document.getElementById("currentState").innerText = (data.status || "IDLE").toUpperCase();
         document.getElementById("coil_id").innerText = data.coil_id || "";
         document.getElementById("cycle_uid").innerText = data.cycle_uid || "";
     } catch (err) {
         console.error("fetchCurrentStatus error:", err);
+    } finally {
+        dashBusy = false;
     }
+}
+
+// Per-map filter chips: each map keeps its own filters.
+function bindDualFilters(n, map) {
+    const box = document.querySelector(`.si-coil-filters[data-map="${n}"]`);
+    if (!box || !map) return;
+    const sync = () => {
+        box.querySelectorAll(".si-fchip[data-type]").forEach(b => {
+            const t = b.dataset.type;
+            const on = t === "ALL" ? DUAL_TYPES.every(k => map.filters[k]) : !!map.filters[t];
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+    };
+    box.addEventListener("click", e => {
+        const b = e.target.closest(".si-fchip");
+        if (!b) return;
+        const t = b.dataset.type;
+        if (t === "ALL") {
+            DUAL_TYPES.forEach(k => { map.filters[k] = true; });
+            map.render();
+        } else {
+            map.toggleFilter(t);
+        }
+        sync();
+    });
+    sync();
 }
 
 // ======================== DASHBOARD: LIVE CAMERA FEED ========================
@@ -1230,51 +1403,24 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     $('#date_range').on("cancel.daterangepicker", () => $(this).val(""));
 
-    // Coil map init
-    coilMap = new CoilMap("coilMap", "mapTooltip");
-    window.coilMap = coilMap; // for filter buttons (onclick)
-    document.getElementById("siZoomReset")?.addEventListener("click", () => coilMap.resetZoom());
-    const filterBtns = document.querySelectorAll('.defect-filter-btn:not(.rd-filter-btn)');
-    filterBtns.forEach(btn => {
-        btn.dataset.origColor = btn.style.background;  // save before any change
-        btn.addEventListener('click', () => {
-            const type = btn.dataset.type;
-            btn.classList.toggle('active');
-            if (btn.classList.contains('active')) {
-                btn.style.background = btn.dataset.origColor;
-                btn.style.color      = '#fff';
-                btn.style.boxShadow  = '';
-            } else {
-                btn.style.background = 'transparent';
-                btn.style.color      = btn.dataset.origColor;
-                btn.style.boxShadow  = 'inset 0 0 0 2px ' + btn.dataset.origColor;
-            }
-            if (coilMap) coilMap.toggleFilter(type);
-        });
-    });
+    // Dashboard: two stacked coil maps, each with its own filter chips
+    coilMap  = new CoilMap("cmCanvas1", "cmTip1", "cmStart1", "cmEnd1", { height: 170 });
+    coilMap2 = new CoilMap("cmCanvas2", "cmTip2", "cmStart2", "cmEnd2", { height: 170 });
+    window.coilMap  = coilMap;
+    window.coilMap2 = coilMap2;
+    bindDualFilters(1, coilMap);
+    bindDualFilters(2, coilMap2);
 
-    const cameraSlots = document.querySelectorAll('[id^="camera-slot-"]');
-    cameraSlots.forEach(slot => {
-        slot.addEventListener('click', () => {
-            const img = slot.querySelector('img');
-            if (img && img.src) {
-                clearDefectNav();
-                openImageModal(img.src, 'Live Camera Feed');
-            } else {
-                console.warn('No image in camera slot');
-            }
-        });
-    });
+    // Camera feed panel was removed from the dashboard -> updateCameraImages()
+    // is no longer polled (the /api/live-ip-camera endpoint is left in place).
 
     // Initial data fetch
     fetchSystemStatus();
     fetchCurrentStatus();
-    updateCameraImages();
 
     // Polling
     setInterval(fetchSystemStatus, 5000);
     setInterval(fetchCurrentStatus, 5000);
-    setInterval(updateCameraImages, 1000);   // live annotated frame updates ~1/s
 
     // Auto-refresh after 30min inactivity
     let lastActivity = Date.now();
