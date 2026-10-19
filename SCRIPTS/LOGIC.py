@@ -483,19 +483,15 @@ def process_labels(labels, img_shape):
 
         # normalize + filter
         if "OIL" in raw_cls:
-            if score > 0.80:
+            if score > 0.75:
                 cls = "O"
         elif "WHITE_SPOT" == raw_cls:
-            if score > 0.85:
+            if score > 0.80:
                 cls = "W"
         elif "SCORING" == raw_cls:
-            if score < 0.40:
-                cls = "O"
-            else:
-                cls = "S"
+            cls = "S"
         elif "DENT" == raw_cls:
-            if score > 0.85:
-                cls = "D"
+            cls = "D"
         elif "SCRATCH" == raw_cls:
             cls = "C"
         else:
