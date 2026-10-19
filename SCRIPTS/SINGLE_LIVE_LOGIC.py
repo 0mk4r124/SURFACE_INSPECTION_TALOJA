@@ -124,9 +124,9 @@ LOOP_SLEEP       = 0.3
 
 # Model files - MUST match LOGIC._build_model
 MODEL_CONFIG = os.path.join(L.MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
-MODEL_FOLDER = os.path.join(L.MODEL_DIR, "TALOJA_MODEL_15OCT")
+MODEL_FOLDER = os.path.join(L.MODEL_DIR, "TALOJA_MODEL_17OCT")
 MODEL_FILE   = "model_final.pth"
-CLASS_JSON   = os.path.join(L.MODEL_DIR, "TALOJA_MODEL_15OCT/TALOJA_MODEL_15OCT.json")
+CLASS_JSON   = os.path.join(L.MODEL_DIR, "TALOJA_MODEL_17OCT/TALOJA_MODEL_17OCT.json")
 SCORE_THRESH = 0.50
 
 
