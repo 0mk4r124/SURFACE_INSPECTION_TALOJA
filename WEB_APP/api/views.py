@@ -578,8 +578,9 @@ def get_recent_coils(request):
         limit = 2
     exclude = (request.GET.get("exclude") or "").strip()
 
-    # cycle_uid is ROLL_YYYYMMDDHHMMSS -> sorts in capture (line) order
-    queryset = DEFECTS_HISTORY.objects.all().order_by("-cycle_uid", "-create_time")
+    # newest completed first (CREATE_TIME is set when LOGIC saves the finished coil).
+    # Not by cycle_uid: rows with an odd / non-ROLL_ uid sorted above real coils.
+    queryset = DEFECTS_HISTORY.objects.all().order_by("-create_time", "-id")
     if exclude:
         queryset = queryset.exclude(cycle_uid=exclude)
 

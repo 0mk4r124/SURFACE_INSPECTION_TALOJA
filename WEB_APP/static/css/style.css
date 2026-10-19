@@ -1317,3 +1317,7 @@ body {
     background-color: #ffd6da !important;
     color: #b0161f;
 }
+
+/* run-details modal: dashboard-style filter chips in the map header */
+#runDetailsModal .rd-coil-filters { justify-content: flex-end; }
+#runDetailsModal .si-scanner-header { flex-wrap: wrap; gap: 8px; }

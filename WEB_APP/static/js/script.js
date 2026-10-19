@@ -8,6 +8,7 @@ let statusCheckInterval = null;
 let systemData = {};  
 let modalOpen = false; 
 let rdCoilMap = null;
+let rdFilterSync = () => {};   // set in DOMContentLoaded (run-details filter chips)
 // ---- defect carousel / details panel ----
 const FRAME_WIDTH_MM   = 400;   // MUST match backend FRAME_WIDTH_MM (was hardcoded 300)
 const CLICK_NAV_ENABLED = true; // left-click = prev, right-click = next on the image
@@ -677,6 +678,7 @@ class CoilMap {
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         ctx.fillStyle = "#0f172a";
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        this.drawGrid();
 
         this.visiblePoints = [];
 
@@ -739,6 +741,63 @@ class CoilMap {
             ctx.fillStyle = this.getColor(defect.type);
             ctx.fill();
         }
+        this.updateAxis();
+    }
+
+    // Guide lines under the dots: quarter-length gridlines, FOV-centre line,
+    // and tick marks along the top/bottom edges (long every 1/4, short every 1/20).
+    drawGrid() {
+        const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
+        if (!W || !H) return;
+        ctx.save();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.20)";
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        for (let i = 1; i < 4; i++) {
+            const x = Math.round(W * i / 4) + 0.5;
+            ctx.moveTo(x, 0); ctx.lineTo(x, H);
+        }
+        const cy = Math.round(H / 2) + 0.5;           // FOV centre (OS below / DS above)
+        ctx.moveTo(0, cy); ctx.lineTo(W, cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.55)";
+        ctx.beginPath();
+        for (let i = 1; i < 20; i++) {
+            const x = Math.round(W * i / 20) + 0.5;
+            const len = (i % 5 === 0) ? 8 : 4;
+            ctx.moveTo(x, 0); ctx.lineTo(x, len);
+            ctx.moveTo(x, H); ctx.lineTo(x, H - len);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // Axis under the map: 5 labels (0, 1/4, 1/2, 3/4, end of the VISIBLE range),
+    // lined up with the gridlines and kept correct while zooming / panning.
+    updateAxis() {
+        const s = document.getElementById(this.startLabelId);
+        const e = document.getElementById(this.endLabelId);
+        if (!s || !e || s.parentElement !== e.parentElement) return;
+        const axis = s.parentElement;
+        let mids = axis.querySelectorAll(".cm-tick-mid");
+        if (mids.length !== 3) {
+            mids.forEach(m => m.remove());
+            for (let i = 0; i < 3; i++) {
+                const sp = document.createElement("span");
+                sp.className = "cm-tick-mid";
+                axis.insertBefore(sp, e);
+            }
+            mids = axis.querySelectorAll(".cm-tick-mid");
+        }
+        const W = this.canvas.width || 1;
+        const span = (this.maxLen - this.minLen) || 1;
+        const lenAt = x => this.minLen + ((x - this.offsetX) / (W * this.scaleX)) * span;
+        const fmt = mm => `${Math.max(0, Math.round(mm / 1000)).toLocaleString("en-IN")} m`;
+        s.textContent = fmt(lenAt(0));
+        e.textContent = fmt(lenAt(W));
+        mids.forEach((m, i) => { m.textContent = fmt(lenAt(W * (i + 1) / 4)); });
     }
 
     bindEvents() {
@@ -937,17 +996,20 @@ function renderCoilSlot(n, info, map) {
 }
 
 // Card info for a completed coil from get_recent_coils (+ its run JSON for the map).
+// Tile counts come from the run JSON with the JS MAP_MIN_CONF rule, so they always
+// match the dots on the map (server counts are only the fallback).
 async function completedCoilInfo(coil, tag, tagClass) {
     if (!coil) return null;
     const run = coil.json_available ? await loadRunData(coil.cycle_uid) : null;
+    const vis = run ? countVisibleDefects(run.result) : null;
     return {
         tag, tagClass,
         coilId: coil.coil_id,
         cycleUid: coil.cycle_uid,
         meta: `Completed ${fmtClock(coil.completed_at)}`,
         lengthMm: run ? (Number(run.coil_length_mm) || maxFrameLengthMm(run)) : 0,
-        counts: coil.counts || {},
-        total: Number(coil.total) || 0,
+        counts: vis ? vis.counts : (coil.counts || {}),
+        total: vis ? vis.total : (Number(coil.total) || 0),
         live: false,
         mapData: run,
         mapMissing: !coil.json_available,
@@ -955,7 +1017,27 @@ async function completedCoilInfo(coil, tag, tagClass) {
     };
 }
 
-function setStatusBar(data, isLive, recent) {
+// The coil in live.json after it has finished: it stays on the TOP map until
+// the next coil starts. Full map from its cycle JSON; live.json as fallback.
+async function finishedLiveCoilInfo(data) {
+    const run = await loadRunData(data.cycle_uid);
+    const src = run || data;
+    const vis = countVisibleDefects(src.result);
+    return {
+        tag: "COMPLETED", tagClass: "si-tag-done",
+        coilId: data.coil_id || (run && run.coil_id),
+        cycleUid: data.cycle_uid,
+        meta: `Completed ${fmtClock(data.last_updated)}`,
+        lengthMm: run ? (Number(run.coil_length_mm) || maxFrameLengthMm(run))
+                      : (Number(data.current_position_mm) || maxFrameLengthMm(data)),
+        counts: vis.counts, total: vis.total,
+        live: false,
+        mapData: src,
+        key: run ? `done:${data.cycle_uid}` : `livejson:${data.cycle_uid}:${data.last_updated || ""}`
+    };
+}
+
+function setStatusBar(data, isLive, top, bottom) {
     const statusEl = document.getElementById("siStatus");
     if (statusEl) {
         const st = String(data.status || "").toLowerCase();
@@ -974,29 +1056,24 @@ function setStatusBar(data, isLive, recent) {
 
     const idLabel = document.getElementById("siIdLabel");
     const idEl = document.getElementById("siCoilId");
-    if (isLive) {
-        if (idLabel) idLabel.textContent = "COIL ID";
-        if (idEl) idEl.textContent = data.coil_id || "?";
-    } else {
-        if (idLabel) idLabel.textContent = "LAST COMPLETED";
-        if (idEl) idEl.textContent = (recent[0] && recent[0].coil_id) || "--";
-    }
+    if (idLabel) idLabel.textContent = isLive ? "COIL ID" : "LAST COMPLETED";
+    if (idEl) idEl.textContent = (top && top.coilId) || "--";
 
-    const side = isLive ? recent[0] : recent[1];
     const sideLabel = document.getElementById("siSideLabel");
     const sideId = document.getElementById("siSideId");
     const sideMeta = document.getElementById("siSideMeta");
     if (sideLabel) sideLabel.textContent = isLive ? "PREVIOUS COIL" : "LAST COIL";
-    if (sideId) sideId.textContent = side ? (side.coil_id || "?") : "--";
-    if (sideMeta) sideMeta.textContent = side
-        ? `Completed ${fmtClock(side.completed_at)} · ${Number(side.total) || 0} defects`
-        : "";
+    if (sideId) sideId.textContent = bottom ? (bottom.coilId || "?") : "--";
+    if (sideMeta) sideMeta.textContent = bottom ? `${bottom.meta} · ${bottom.total} defects` : "";
 }
 
+// recent = completed coils from get_recent_coils, EXCLUDING the live.json coil.
+//   processing           -> top: live coil            bottom: recent[0] (previous)
+//   finished, live.json  -> top: that finished coil    bottom: recent[0] (last coil)
+//   no coil in live.json -> top: recent[0]            bottom: recent[1]
+// So a finished coil stays on the top map until the next coil starts.
 async function updateSIDashboard(data, recent, isLive) {
     recent = Array.isArray(recent) ? recent : [];
-    setStatusBar(data, isLive, recent);
-
     let top, bottom;
     if (isLive) {
         // same confidence rule as the coil map (MAP_MIN_CONF): tiles always match the dots
@@ -1010,11 +1087,15 @@ async function updateSIDashboard(data, recent, isLive) {
             live: true, mapData: data, key: `live:${data.cycle_uid || ""}`
         };
         bottom = await completedCoilInfo(recent[0], "PREVIOUS · COMPLETED", "si-tag-done");
+    } else if (data.cycle_uid) {
+        top = await finishedLiveCoilInfo(data);
+        bottom = await completedCoilInfo(recent[0], "LAST COIL", "si-tag-last");
     } else {
         top = await completedCoilInfo(recent[0], "COMPLETED", "si-tag-done");
         bottom = await completedCoilInfo(recent[1], "LAST COIL", "si-tag-last");
     }
 
+    setStatusBar(data, isLive, top, bottom);
     renderCoilSlot(1, top, coilMap);
     renderCoilSlot(2, bottom, coilMap2);
 }
@@ -1031,7 +1112,7 @@ async function fetchCurrentStatus() {
         let recent = [];
         try {
             let url = "/api/get_recent_coils/?limit=2";
-            if (isLive && data.cycle_uid) url += `&exclude=${encodeURIComponent(data.cycle_uid)}`;
+            if (data.cycle_uid) url += `&exclude=${encodeURIComponent(data.cycle_uid)}`;
             const r = await fetch(url);
             if (r.ok) recent = (await r.json()).coils || [];
         } catch (e) {
@@ -1050,21 +1131,24 @@ async function fetchCurrentStatus() {
     }
 }
 
-// Per-map filter chips: each map keeps its own filters.
-function bindDualFilters(n, map) {
-    const box = document.querySelector(`.si-coil-filters[data-map="${n}"]`);
-    if (!box || !map) return;
+// Filter chips (All / O / W / S / D / C) bound to one CoilMap. getMap() may
+// return null until the map exists (run-details modal). Returns sync().
+function bindChipFilters(box, getMap) {
+    if (!box) return () => {};
     const sync = () => {
+        const map = getMap();
         box.querySelectorAll(".si-fchip[data-type]").forEach(b => {
             const t = b.dataset.type;
-            const on = t === "ALL" ? DUAL_TYPES.every(k => map.filters[k]) : !!map.filters[t];
+            const on = !map ? true
+                : (t === "ALL" ? DUAL_TYPES.every(k => map.filters[k]) : !!map.filters[t]);
             b.classList.toggle("active", on);
             b.setAttribute("aria-pressed", on ? "true" : "false");
         });
     };
     box.addEventListener("click", e => {
         const b = e.target.closest(".si-fchip");
-        if (!b) return;
+        const map = getMap();
+        if (!b || !map) return;
         const t = b.dataset.type;
         if (t === "ALL") {
             DUAL_TYPES.forEach(k => { map.filters[k] = true; });
@@ -1075,6 +1159,12 @@ function bindDualFilters(n, map) {
         sync();
     });
     sync();
+    return sync;
+}
+
+// Per-map filter chips on the dashboard: each map keeps its own filters.
+function bindDualFilters(n, map) {
+    return bindChipFilters(document.querySelector(`.si-coil-filters[data-map="${n}"]`), () => map);
 }
 
 // ======================== DASHBOARD: LIVE CAMERA FEED ========================
@@ -1309,14 +1399,9 @@ function showRunDetails(data, meta) {
     document.getElementById("rdStatS").innerText = tc.S;
     document.getElementById("rdStatC").innerText = tc.C;
 
-    // Reset filter button states
-    document.querySelectorAll(".rd-filter-btn").forEach(b => {
-        b.classList.add("active");
-        b.style.background = b.dataset.origColor || b.style.background;
-        b.style.color      = '#fff';
-        b.style.boxShadow  = '';
-    });
+    // Reset filters: every run opens with all defect types shown
     if (rdCoilMap) rdCoilMap.filters = { W: true,  O: true,  D: true, S: true, C: true };
+    rdFilterSync();
 
     // Stage data for CoilMap ? applied after modal finishes showing
     rdPendingData = data;
@@ -1414,6 +1499,8 @@ document.addEventListener("DOMContentLoaded", () => {
     window.coilMap2 = coilMap2;
     bindDualFilters(1, coilMap);
     bindDualFilters(2, coilMap2);
+    // run-details modal: same chips; its CoilMap is created when the modal first opens
+    rdFilterSync = bindChipFilters(document.querySelector(".rd-coil-filters"), () => rdCoilMap);
 
     // Camera feed panel was removed from the dashboard -> updateCameraImages()
     // is no longer polled (the /api/live-ip-camera endpoint is left in place).
@@ -1435,22 +1522,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("runDetailsModal").addEventListener("shown.bs.modal", function () {
         if (!rdCoilMap) {
             rdCoilMap = new CoilMap("rdCoilMap", "rdMapTooltip", "rdCoilStart", "rdCoilEnd");
-            document.querySelectorAll(".rd-filter-btn").forEach(btn => {
-                btn.dataset.origColor = btn.style.background;  // save before any change
-                btn.addEventListener("click", () => {
-                    btn.classList.toggle("active");
-                    if (btn.classList.contains('active')) {
-                        btn.style.background = btn.dataset.origColor;
-                        btn.style.color      = '#fff';
-                        btn.style.boxShadow  = '';
-                    } else {
-                        btn.style.background = 'transparent';
-                        btn.style.color      = btn.dataset.origColor;
-                        btn.style.boxShadow  = 'inset 0 0 0 2px ' + btn.dataset.origColor;
-                    }
-                    if (rdCoilMap) rdCoilMap.toggleFilter(btn.dataset.type);
-                });
-            });
+            rdFilterSync();
         } else {
             rdCoilMap.resize();
         }
