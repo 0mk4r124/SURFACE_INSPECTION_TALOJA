@@ -18,7 +18,7 @@ const MAP_WIDTH_BIN_MM = 10;    // coil map: same-type defects within a 10 mm wi
 // coil map: per-type minimum confidence (%) to be shown. Types not listed show at any score.
 // Also used for every defect COUNT (live tiles, details modal, history table).
 // MUST match MAP_MIN_CONF in api/views.py (history table + CSV) - change both together.
-const MAP_MIN_CONF = { W: 85, O: 90 };
+const MAP_MIN_CONF = { W: 90, O: 90 };
 
 function passesMapConf(d) {
     const min = MAP_MIN_CONF[d.type];
@@ -891,7 +891,7 @@ let coilMap2 = null;   // bottom map (previous completed coil, or the one before
 // ======================== DASHBOARD: DUAL COIL VIEW ========================
 // Red blinking alarm on a defect tile when its (visible) count is OVER the limit.
 // Counts use the same MAP_MIN_CONF rule as the map dots and the history table.
-const ALARM_LIMITS = { O: 5000, W: 300, S: 5000, D: 5000, C: 5000 };
+const ALARM_LIMITS = { O:100000, W: 300, S: 5000, D: 5000, C: 5000 };
 const DUAL_TYPES   = ["O", "W", "S", "D", "C"];
 const LIVE_STATUSES = ["inprogress", "processing", "running"];
 

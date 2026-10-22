@@ -56,8 +56,8 @@ CAMERA_CONFIGS = {
         #
         # Move down ONE ROW AT A TIME and check p99.9 stays near its old value.
         # ------------------------------------------------------------------
-        "EXPOSURE": 250.0,          # paired with GAIN below - do not change alone
-        "GAIN": 19.9,                # dB. 6=2x, 9.5=3x, 12=4x, 15.6=6x, 19.9=~9.9x (was 350us @ 17.0dB)
+        "EXPOSURE": 350.0,          # paired with GAIN below - do not change alone
+        "GAIN": 17.0,                # dB. 6=2x, 9.5=3x, 12=4x, 15.6=6x, 19.9=~9.9x (was 350us @ 17.0dB)
         "GAMMA_ENABLE": False,      # linear response for inspection
         # ------------------------------------------------------------------
         # BINNING MUST STAY 1/1.

@@ -73,8 +73,8 @@ LIVE_FULL_DEFECT_MAP = os.environ.get('LIVE_FULL_DEFECT_MAP', '1') == '1'
 # ---- speed / storage tuning ----
 DEBUG_IMG_INTERVAL = 2.0  # write <cam>_debug.jpg at most once per this many secs
 MQTT_UI_INTERVAL   = 1.0  # publish ui/logic + health at most once per this many secs
-SAVE_SCALE   = float(os.environ.get('SAVE_SCALE', '0.8'))  # stored trash copy is downscaled (inference stays full-size)
-SAVE_QUALITY = int(os.environ.get('SAVE_QUALITY', '80'))   # JPEG quality of stored trash copy
+SAVE_SCALE   = float(os.environ.get('SAVE_SCALE', '1'))  # stored trash copy is downscaled (inference stays full-size)
+SAVE_QUALITY = int(os.environ.get('SAVE_QUALITY', '100'))   # JPEG quality of stored trash copy
 SAVE_QUEUE_MAX = int(os.environ.get('SAVE_QUEUE_MAX', '1024'))
 SAVE_WORKERS = int(os.environ.get('SAVE_WORKERS', '24'))
 
@@ -1412,10 +1412,10 @@ def _build_model(tag):
     return MASKRCNN(
         tag,
         os.path.join(MODEL_DIR, "configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"),
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_17OCT"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_21OCT"),
         "model_final.pth",
         0.50,
-        os.path.join(MODEL_DIR, "TALOJA_MODEL_17OCT/TALOJA_MODEL_17OCT.json"),
+        os.path.join(MODEL_DIR, "TALOJA_MODEL_21OCT/TALOJA_MODEL_21OCT.json"),
         False,
         GPU_ID=0
     )
