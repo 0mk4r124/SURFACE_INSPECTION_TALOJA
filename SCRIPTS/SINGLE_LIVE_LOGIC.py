@@ -156,6 +156,11 @@ class BatchedMaskRCNN:
         with open(CLASS_JSON, "r") as f:
             label_map = json.load(f)
         self.class_array = np.array(list(label_map.values()))
+        # what the model can output vs what process_labels maps (silent-drop check)
+        logger.info(f"model classes ({os.path.basename(CLASS_JSON)}): {label_map}")
+        logger.info(f"rules: WS_REJECT_MODE={L.WS_REJECT_MODE} WS_SHAPE_CLASSES={sorted(WS_SHAPE_CLASSES)} "
+                    f"SCORING_MIN_LEN_MM={L.SCORING_MIN_LEN_MM} DEDUP_OVERLAP={L.DEDUP_OVERLAP} "
+                    f"DEDUP_CROSS_CLASS={L.DEDUP_CROSS_CLASS}")
 
         cfg = get_cfg()
         cfg.TEST.DETECTIONS_PER_IMAGE = 20
@@ -419,7 +424,7 @@ class Processor:
         try:
             diameter, eg_setpoint, distance = frame_meta(name)
             labels = build_labels(raw)
-            boxes, counts = L.process_labels(labels, img.shape)
+            boxes, counts = L.process_labels(labels, img.shape, img=img)
             total = sum(counts.values())
             severity = L.calculate_severity(total)
 

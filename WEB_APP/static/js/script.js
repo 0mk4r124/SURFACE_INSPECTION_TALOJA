@@ -442,6 +442,19 @@ function renderDefectDetails(point) {
         ["FRAME WIDTH", `${FRAME_WIDTH_MM} mm`]
     ];
 
+    // white-spot shape gate verdict (backend WS_SHAPE), when present
+    const sh = point.shape;
+    if (sh && sh.shape) {
+        const okCol = sh.ok ? "#16a34a" : "#dc2626";
+        rows.push(["SHAPE", `<span style="color:${okCol};font-weight:700">${sh.shape}</span>`
+                            + (sh.why ? ` <span class="im-sub">(${sh.why})</span>` : "")]);
+        if (sh.maj_mm != null) rows.push(["SPOT SIZE", `${n(sh.maj_mm)} &times; ${n(sh.min_mm)} mm`]);
+        if (sh.ar != null)     rows.push(["ASPECT", `${n(sh.ar, 2)} <span class="im-sub">(max ${n(sh.ar_max, 1)}${sh.clean ? ", clean" : ""})</span>`]);
+        if (sh.iou != null)    rows.push(["ELLIPSE IOU", `${n(sh.iou, 2)} <span class="im-sub">sol ${n(sh.sol, 2)}</span>`]);
+        if (Array.isArray(sh.sym)) rows.push(["SYMMETRY", `${n(sh.sym[0], 2)} / ${n(sh.sym[1], 2)}`]);
+        if (Array.isArray(sh.ct))  rows.push(["CONTRAST", `${n(sh.ct[2])} <span class="im-sub">(in ${n(sh.ct[0])} / ring ${n(sh.ct[1])})</span>`]);
+    }
+
     body.innerHTML = rows
         .map(([k, v]) => `<div class="im-row"><div class="im-key">${k}</div><div class="im-val">${v}</div></div>`)
         .join("");
@@ -630,6 +643,7 @@ class CoilMap {
                                 imgH: frame.compressed_height || null,
                                 wMm: defect.w_mm != null ? defect.w_mm : null,
                                 hMm: defect.h_mm != null ? defect.h_mm : null,
+                                shape: defect.shape || null,
                             });
                         });
                     }

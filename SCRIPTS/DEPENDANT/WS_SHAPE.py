@@ -29,6 +29,8 @@ Verdicts (result["shape"])
   "OVERSTRETCHED" rejected, too elongated for its quality tier
   "IRREGULAR"     rejected, ragged / non-elliptical outline
   "ASYMMETRIC"    rejected, lopsided
+  "FAINT"         rejected, not brighter than the strip around it
+                  (only when WS_MIN_CONTRAST > 0; see apply_contrast)
   "UNKNOWN"       polygon unusable (too few points / too small)
 
 Usage from LOGIC.py (only lines LOGIC.py needs)
@@ -89,6 +91,15 @@ WS_SYM_MINOR_MIN   = float(os.environ.get("WS_SYM_MINOR_MIN", "0.82"))
 # sanity limits
 WS_MIN_AREA_PX     = float(os.environ.get("WS_MIN_AREA_PX", "25"))
 _MAX_CANVAS        = 4000   # px; guards against pathological fits
+
+# brightness / contrast gate (needs the frame; see analyze_contrast).
+# A white spot is BRIGHTER than the strip around it. A faint smear that the
+# model calls white spot (oil film, roll mark) barely differs from its
+# surroundings. ct = [mean_in, mean_ring, delta] in 0-255 grey levels is
+# ALWAYS recorded; the gate only acts when WS_MIN_CONTRAST > 0.
+# 0 = disabled (default, preserves current verdicts).
+WS_MIN_CONTRAST    = float(os.environ.get("WS_MIN_CONTRAST", "0"))
+WS_RING_PX         = int(os.environ.get("WS_RING_PX", "15"))   # ring width around the blob
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +318,58 @@ def scale_shape(shp, scale):
         return shp
     except Exception:
         return shp
+
+
+def analyze_contrast(img, polygon, ring_px=None):
+    """Brightness of the blob vs a ring of strip around it.
+
+    Works on a small crop around the polygon only (cost ~ the blob size,
+    not the frame). Returns [mean_in, mean_ring, delta] (grey levels, delta =
+    in - ring, positive = brighter than surroundings) or None.
+    """
+    try:
+        if img is None or polygon is None:
+            return None
+        ring_px = WS_RING_PX if ring_px is None else ring_px
+        cnt = np.asarray(polygon, dtype=np.int32).reshape(-1, 1, 2)
+        if cnt.shape[0] < 3:
+            return None
+        H, W = img.shape[:2]
+        x, y, bw, bh = cv2.boundingRect(cnt)
+        x1 = max(0, x - ring_px); y1 = max(0, y - ring_px)
+        x2 = min(W, x + bw + ring_px); y2 = min(H, y + bh + ring_px)
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        crop = img[y1:y2, x1:x2]
+        if crop.ndim == 3:
+            crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+        inner = np.zeros(crop.shape, np.uint8)
+        cv2.drawContours(inner, [cnt - np.array([[[x1, y1]]], dtype=np.int32)], -1, 1, -1)
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * ring_px + 1, 2 * ring_px + 1))
+        ring = cv2.dilate(inner, k) & (1 - inner)
+
+        if not inner.any() or not ring.any():
+            return None
+        m_in = float(cv2.mean(crop, mask=inner)[0])
+        m_ring = float(cv2.mean(crop, mask=ring)[0])
+        return [round(m_in, 1), round(m_ring, 1), round(m_in - m_ring, 1)]
+    except Exception:
+        print(f"analyze_contrast failed: {traceback.format_exc()}")
+        return None
+
+
+def apply_contrast(shp, ct):
+    """Attach ct to a shape dict and, when WS_MIN_CONTRAST > 0, reject an
+    otherwise-accepted spot that is not brighter than its surroundings by at
+    least WS_MIN_CONTRAST. Earlier rejects keep their reason. Safe on None."""
+    if not shp or ct is None:
+        return shp
+    shp["ct"] = ct
+    if WS_MIN_CONTRAST > 0 and shp.get("ok") and ct[2] < WS_MIN_CONTRAST:
+        shp.update(shape="FAINT", ok=False, why="contrast")
+    return shp
 
 
 def draw_shape(img, shp, ok_color=(0, 255, 255), bad_color=(0, 0, 255)):

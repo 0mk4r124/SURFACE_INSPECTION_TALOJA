@@ -16,7 +16,7 @@ from threading import Lock, Event
 from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
-from DEPENDANT.WS_SHAPE import analyze_polygon_shape, scale_shape, draw_shape
+from DEPENDANT.WS_SHAPE import analyze_polygon_shape, scale_shape, draw_shape, analyze_contrast, apply_contrast
 
 LOCATION = "TALOJA"
 
@@ -131,8 +131,13 @@ DEFECT_CONFIG = {
 
 # White-spot shape gate:
 #   "flag" (default) = keep rejected spots, just mark them (current behaviour)
+#                      NOTE: they are still COUNTED and SHOWN as white spot
 #   "drop"           = a white spot that fails the oval/egg test is discarded
+#   "oil"            = a white spot that fails the test is reported as OIL
+#                      STAIN instead (shape dict kept, so it stays traceable)
 WS_REJECT_MODE = os.environ.get("WS_REJECT_MODE", "flag").lower()
+
+_unmapped_classes = set()   # raw model class names process_labels does not know (logged once)
 
 # physical width covered by one frame - MUST match script.js FRAME_WIDTH_MM
 FRAME_WIDTH_MM = float(os.environ.get("FRAME_WIDTH_MM", "400"))
@@ -443,9 +448,15 @@ def dedup_overlapping(defect_boxes):
                   reverse=True)
         kept = []
         for cls, it in flat:
-            if any((DEDUP_CROSS_CLASS or kc == cls)
-                   and _box_overlap_ratio(it["b"], k["b"]) > DEDUP_OVERLAP
-                   for kc, k in kept):
+            winner = next(((kc, k) for kc, k in kept
+                           if (DEDUP_CROSS_CLASS or kc == cls)
+                           and _box_overlap_ratio(it["b"], k["b"]) > DEDUP_OVERLAP), None)
+            if winner is not None:
+                if winner[0] != cls:
+                    # cross-class drop is rare and matters (e.g. a DENT hidden
+                    # under a higher-score OIL_STAIN) - make it visible
+                    logger.info(f"dedup: dropped {cls} c={it.get('c')} box={it['b']} "
+                                f"under {winner[0]} c={winner[1].get('c')}")
                 continue
             kept.append((cls, it))
         flat = kept
@@ -457,7 +468,9 @@ def dedup_overlapping(defect_boxes):
     return out
 
 
-def process_labels(labels, img_shape):
+def process_labels(labels, img_shape, img=None):
+    """img (optional, full-size BGR frame): enables the white-spot contrast
+    metric. Callers that do not pass it get exactly the old behaviour."""
     h, w = img_shape[:2]
     defect_boxes = defaultdict(list)
 
@@ -495,6 +508,12 @@ def process_labels(labels, img_shape):
         elif "SCRATCH" == raw_cls:
             cls = "C"
         else:
+            # silent before: a class name that does not match exactly
+            # (e.g. "DENTS", "Scoring Mark") vanished with no trace
+            if raw_cls not in _unmapped_classes:
+                _unmapped_classes.add(raw_cls)
+                logger.warning(f"process_labels: model class '{raw_cls}' is not mapped "
+                               f"to O/W/S/D/C - these detections are DROPPED")
             continue
 
         if cls not in ALLOWED_DEFECTS:
@@ -530,9 +549,14 @@ def process_labels(labels, img_shape):
         if cls == "W" and poly:
             shp = analyze_polygon_shape(poly, mm_per_px=FRAME_WIDTH_MM / float(w))
             if shp:
+                if img is not None and shp.get("shape") != "UNKNOWN":
+                    apply_contrast(shp, analyze_contrast(img, poly))
                 item["shape"] = shp
-                if WS_REJECT_MODE == "drop" and not shp.get("ok", True):
-                    continue
+                if not shp.get("ok", True):
+                    if WS_REJECT_MODE == "drop":
+                        continue
+                    if WS_REJECT_MODE == "oil":
+                        cls = "O"
 
         defect_boxes[cls].append(item)
 
