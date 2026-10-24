@@ -34,9 +34,9 @@ BASE_FILE_PATH = os.environ.get("BASE_FILE_PATH","/home/hindalco_surface_inspect
 LOGS_PATH = os.path.join(BASE_FILE_PATH, "DEBUGS", "LOGS")
 
 DISK_CHECK_INTERVAL = 60   # seconds between routine checks
-TRIGGER_PCT         = 95   # start cleaning above this %
+TRIGGER_PCT         = 90   # start cleaning above this %
 TARGET_PCT          = 70   # stop cleaning once below this %
-RETENTION_DAYS      = 7    # NEVER delete files newer than this
+RETENTION_DAYS      = 1    # NEVER delete files newer than this
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 
