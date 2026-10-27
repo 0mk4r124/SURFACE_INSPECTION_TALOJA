@@ -16,7 +16,7 @@ from threading import Lock, Event
 from DEPENDANT.INFERENCE import MASKRCNN
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
-from DEPENDANT.WS_SHAPE import analyze_polygon_shape, scale_shape, draw_shape, analyze_contrast, apply_contrast
+from DEPENDANT.WS_SHAPE import analyze_polygon_shape, scale_shape, draw_shape, analyze_contrast, apply_contrast, apply_ws_filter
 
 LOCATION = "TALOJA"
 
@@ -129,13 +129,13 @@ DEFECT_CONFIG = {
     "C": {"name": "SCRATCH",   "color": (0, 255, 0)},    # Green
 }
 
-# White-spot shape gate:
-#   "flag" (default) = keep rejected spots, just mark them (current behaviour)
-#                      NOTE: they are still COUNTED and SHOWN as white spot
-#   "drop"           = a white spot that fails the oval/egg test is discarded
-#   "oil"            = a white spot that fails the test is reported as OIL
+# White-spot shape gate (egg shape + WS score + size, see WS_SHAPE.apply_ws_filter):
+#   "oil" (default)  = a white spot that fails any gate is reported as OIL
 #                      STAIN instead (shape dict kept, so it stays traceable)
-WS_REJECT_MODE = os.environ.get("WS_REJECT_MODE", "flag").lower()
+#   "flag"           = keep rejected spots, just mark them (old behaviour)
+#                      NOTE: they are still COUNTED and SHOWN as white spot
+#   "drop"           = a white spot that fails any gate is discarded
+WS_REJECT_MODE = os.environ.get("WS_REJECT_MODE", "oil").lower()
 
 _unmapped_classes = set()   # raw model class names process_labels does not know (logged once)
 
@@ -551,8 +551,10 @@ def process_labels(labels, img_shape, img=None):
             if shp:
                 if img is not None and shp.get("shape") != "UNKNOWN":
                     apply_contrast(shp, analyze_contrast(img, poly))
+                apply_ws_filter(shp)     # WS score + size gate (OIL_LIKE / OVERSIZE)
                 item["shape"] = shp
-                if not shp.get("ok", True):
+                # UNKNOWN = polygon unusable (tiny / few points): never converted
+                if not shp.get("ok", True) and shp.get("shape") != "UNKNOWN":
                     if WS_REJECT_MODE == "drop":
                         continue
                     if WS_REJECT_MODE == "oil":

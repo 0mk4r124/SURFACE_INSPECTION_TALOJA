@@ -453,6 +453,7 @@ function renderDefectDetails(point) {
         if (sh.iou != null)    rows.push(["ELLIPSE IOU", `${n(sh.iou, 2)} <span class="im-sub">sol ${n(sh.sol, 2)}</span>`]);
         if (Array.isArray(sh.sym)) rows.push(["SYMMETRY", `${n(sh.sym[0], 2)} / ${n(sh.sym[1], 2)}`]);
         if (Array.isArray(sh.ct))  rows.push(["CONTRAST", `${n(sh.ct[2])} <span class="im-sub">(in ${n(sh.ct[0])} / ring ${n(sh.ct[1])})</span>`]);
+        if (sh.wss != null)        rows.push(["WS SCORE", `${n(sh.wss, 2)} <span class="im-sub">(old ${n(sh.wss_old, 2)}${sh.rv ? ", review" : ""})</span>`]);
     }
 
     body.innerHTML = rows
