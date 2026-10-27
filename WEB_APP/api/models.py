@@ -30,6 +30,28 @@ class HEALTH_STATUS(models.Model):
         return f'{self.location} | {self.device_type} | {self.status}'
 
 
+class DB_COIL_ID_SYNC_LOG(models.Model):
+    id = models.AutoField(db_column='ID', primary_key=True)
+    coil_id = models.CharField(db_column='COIL_ID', max_length=100)
+    entry_guage_point = models.CharField(db_column='ENRTY_GUAGE_POINT', max_length=100)
+    exit_guage_point = models.CharField(db_column='EXIT_GUAGE_POINT', max_length=100)
+    width = models.CharField(db_column='WIDTH', max_length=100)
+    alloy = models.CharField(db_column='ALLOY', max_length=100)
+    created_at = models.DateTimeField(db_column='CREATED_AT', default=timezone.now)
+
+    class Meta:
+        managed = True
+
+        db_table = 'DB_COIL_ID_SYNC_LOG'
+
+        indexes = [
+            models.Index(fields=['coil_id'], name='coil_sync_log_idx'),
+            models.Index(fields=['created_at'], name='coil_sync_log_time_idx'),
+        ]
+
+    def __str__(self):
+        return self.coil_id
+
 class DB_COIL_ID_SYNC(models.Model):
     id = models.AutoField(db_column='ID', primary_key=True)
     coil_id = models.CharField(db_column='COIL_ID', max_length=100)
