@@ -86,6 +86,7 @@ import LOGIC as L                       # library: rules, JSON, DB, live.json
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
 from DEPENDANT.INFERENCE import WS_MASK_PASSTHROUGH, WS_SHAPE_CLASSES
+from DEPENDANT import WS_SHAPE as WSS
 
 logger = initializeLogger("SINGLE_LIVE_LOGIC", LOGS_PATH=L.LOGS_PATH)
 
@@ -161,6 +162,14 @@ class BatchedMaskRCNN:
         logger.info(f"rules: WS_REJECT_MODE={L.WS_REJECT_MODE} WS_SHAPE_CLASSES={sorted(WS_SHAPE_CLASSES)} "
                     f"SCORING_MIN_LEN_MM={L.SCORING_MIN_LEN_MM} DEDUP_OVERLAP={L.DEDUP_OVERLAP} "
                     f"DEDUP_CROSS_CLASS={L.DEDUP_CROSS_CLASS}")
+        ws_msg = (f"white spot: reject->{L.WS_REJECT_MODE} score={'on' if WSS.WS_SCORE_ENABLED else 'OFF'} "
+                  f"formula={WSS.WS_SCORE_FORMULA} thr={WSS.WS_SCORE_THRESHOLD} "
+                  f"ar_max={WSS.WS_AR_MAX}/{WSS.WS_AR_MAX_CLEAN} "
+                  f"max_area_mm2={WSS.WS_MAX_AREA_MM2 or 'OFF'}")
+        logger.info(ws_msg)
+        print(ws_msg, flush=True)
+        if WSS.WS_SCORE_ENABLED and WSS.WS_MAX_AREA_MM2 <= 0:
+            logger.warning("white spot SIZE gate is OFF (WS_MAX_AREA_MM2=0)")
 
         cfg = get_cfg()
         cfg.TEST.DETECTIONS_PER_IMAGE = 20

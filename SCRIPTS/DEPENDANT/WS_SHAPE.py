@@ -388,3 +388,90 @@ def draw_shape(img, shp, ok_color=(0, 255, 255), bad_color=(0, 0, 255)):
     except Exception:
         pass
     return img
+
+
+# ===========================================================================
+# White spot vs oil stain decision (validated with SCRIPTS/WS_FILTER_TEST.py)
+# ---------------------------------------------------------------------------
+# Runs AFTER analyze_polygon_shape + apply_contrast. Adds to the shape dict:
+#     wss      score used for the decision (higher = true grey oval)
+#     wss_old  score of the original research formula (for comparison)
+#     rv       True when the score sits in the review band or an input is
+#              outside the range the formula was fitted on
+# and, for a spot that passed every shape gate, rejects it as:
+#     OVERSIZE  area above WS_MAX_AREA_MM2           (why = "size")
+#     OIL_LIKE  score <= WS_SCORE_THRESHOLD            (why = "score")
+# Earlier shape rejects (OVERSTRETCHED / IRREGULAR / ASYMMETRIC / FAINT)
+# keep their own reason; their score is still recorded.
+# A spot with no contrast values (no frame passed) is NOT rejected by score.
+#
+# Formula (R = in/ring, C = in - ring, S2 = sym after slash, E = ellipse IoU,
+# A = aspect; R and A capped at 3.0 - the fit never saw larger values):
+#   new: -57.1 + 5.2 R + 17.5 S2 + 32.5 E + 1.8 A - 0.54 C
+#   old: -53.6 + 1.5 R + 15.6 S2 + 35.1 E + 1.6 A
+# C is in absolute grey levels: valid at EXPOSURE 350 / GAIN 17 only. If the
+# camera exposure or gain changes, set WS_SCORE_FORMULA=old until refit.
+# ===========================================================================
+WS_SCORE_ENABLED   = os.environ.get("WS_SCORE_ENABLED", "1") == "1"
+WS_SCORE_FORMULA   = os.environ.get("WS_SCORE_FORMULA", "new").lower()   # "new" | "old"
+WS_SCORE_THRESHOLD = float(os.environ.get("WS_SCORE_THRESHOLD", "0.0"))
+WS_SCORE_REVIEW    = float(os.environ.get("WS_SCORE_REVIEW", "0.5"))
+# size gate: spots larger than this (mm^2) are rejected. 0 = off.
+# Set from a test coil with SCRIPTS/WS_SIZE_STATS.py.
+WS_MAX_AREA_MM2    = float(os.environ.get("WS_MAX_AREA_MM2", "0"))
+
+_WS_CAP = 3.0
+_WS_FIT_RANGE = {"R": (1.03, 2.90), "S2": (0.83, 0.98), "E": (0.90, 0.98),
+                 "A": (1.31, 2.92), "Cin": (5.2, 33.4), "Ring": (3.0, 17.9)}
+
+if WS_SCORE_FORMULA not in ("new", "old"):
+    print(f"WS_SHAPE: WS_SCORE_FORMULA={WS_SCORE_FORMULA!r} is not 'new'/'old' - using 'new'")
+    WS_SCORE_FORMULA = "new"
+
+
+def ws_score(shp):
+    """(score_used, score_old, out_of_range_list) or None when the panel
+    values needed by the formula are missing."""
+    try:
+        ct, sym = shp.get("ct"), shp.get("sym")
+        E, A = shp.get("iou"), shp.get("ar")
+        if ct is None or sym is None or E is None or A is None or len(sym) < 2:
+            return None
+        cin, ring = float(ct[0]), float(ct[1])
+        if ring <= 0:
+            return None
+        R, C, S2, E, A = cin / ring, cin - ring, float(sym[1]), float(E), float(A)
+        s_old = -53.6 + 1.5 * R + 15.6 * S2 + 35.1 * E + 1.6 * A
+        s_new = (-57.1 + 5.2 * min(R, _WS_CAP) + 17.5 * S2 + 32.5 * E
+                 + 1.8 * min(A, _WS_CAP) - 0.54 * C)
+        vals = {"R": R, "S2": S2, "E": E, "A": A, "Cin": cin, "Ring": ring}
+        oor = [k for k, (lo, hi) in _WS_FIT_RANGE.items() if not lo <= vals[k] <= hi]
+        return (s_new if WS_SCORE_FORMULA == "new" else s_old), s_old, oor
+    except Exception:
+        print(f"ws_score failed: {traceback.format_exc()}")
+        return None
+
+
+def apply_ws_filter(shp):
+    """Score + size gate on a white-spot shape dict (in place). Safe on None."""
+    try:
+        if not shp or shp.get("shape") == "UNKNOWN" or not WS_SCORE_ENABLED:
+            return shp
+        sc = ws_score(shp)
+        if sc is not None:
+            s, s_old, oor = sc
+            shp["wss"] = round(s, 2)
+            shp["wss_old"] = round(s_old, 2)
+            shp["rv"] = bool(abs(s - WS_SCORE_THRESHOLD) <= WS_SCORE_REVIEW or oor)
+
+        if not shp.get("ok"):
+            return shp                      # earlier reject keeps its reason
+
+        area = shp.get("a_mm2")
+        if WS_MAX_AREA_MM2 > 0 and area is not None and area > WS_MAX_AREA_MM2:
+            shp.update(shape="OVERSIZE", ok=False, why="size")
+        elif sc is not None and sc[0] <= WS_SCORE_THRESHOLD:
+            shp.update(shape="OIL_LIKE", ok=False, why="score")
+    except Exception:
+        print(f"apply_ws_filter failed: {traceback.format_exc()}")
+    return shp
