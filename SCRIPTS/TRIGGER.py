@@ -8,6 +8,7 @@ from datetime import datetime
 from DEPENDANT.LOGIX import PLCCOMMINCATION
 from DEPENDANT.MQTT import MQTT
 from DEPENDANT.LOGGING import initializeLogger
+from DEPENDANT.COIL_ID_RESOLVER import CoilIdResolver, NOT_FOUND
 
 BASE_FILE_PATH = os.environ.get('BASE_FILE_PATH', '/home/hindalco_surface_inspection/insightzz/SURFACE_INSPECTION_TALOJA/')
 
@@ -75,8 +76,33 @@ def get_coil_id_from_db_sync_and_save(conn, cycle_uid):
             
     return ""
 
+def insert_mill_run(conn, cycle_uid):
+    """Insert the MILL_RUNS row at trigger with COIL_ID = NOT_FOUND.
+    CoilIdResolver updates COIL_ID once the new coil ID arrives in DB_COIL_ID_SYNC."""
+    if conn is None:
+        logger.error(f"No DB connection - MILL_RUNS row not inserted for {cycle_uid}")
+        return
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO MILL_RUNS (cycle_uid, coil_id, created_at, status) "
+            "VALUES (%s, %s, NOW(), %s)",
+            (cycle_uid, NOT_FOUND, 'RUNNING'))
+        conn.commit()
+    except Exception:
+        logger.error(f"Failed to insert MILL_RUNS row for {cycle_uid}: {traceback.format_exc()}")
+    finally:
+        if cursor:
+            cursor.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 def main():
      last_coil_id = ""
+     coil_resolver = CoilIdResolver(logger=logger)
      mq_obj = MQTT("TRIGGER")
      mq_obj.subscribe("taloja/writer")
      logger.info("Starting trigger manager")
@@ -101,7 +127,8 @@ def main():
                if ((mill_run == 1) or (mill_run == '1')) and diameter > 570 and mill_speed > 150:
                     roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
                     conn = getDBconn()
-                    coil_id = get_coil_id_from_db_sync_and_save(conn, roll_num)
+                    insert_mill_run(conn, roll_num)
+                    coil_id = coil_resolver.start(roll_num)   # first poll now; keeps polling in the loop below
                     # if not (("LPHU" in coil_id) or ("LPML" in coil_id) or ("STCL" in coil_id) or ("STCS" in coil_id)): 
                     #      print(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS | mill_speed = {mill_speed} | width = {width}")    
                     #      if coil_id != last_coil_id: logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS")        
@@ -114,6 +141,8 @@ def main():
                     time.sleep(2)
 
                     while True:
+
+                         coil_resolver.tick()   # polls DB_COIL_ID_SYNC every COIL_ID_POLL_SEC until new coil ID found
 
                          diameter = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[0]")
                          mill_speed = plcobj.read(f"{FRAME_CAPTURE_SIGNAL}[1]") 
@@ -146,6 +175,10 @@ def main():
                          # logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                          # logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
                          # time.sleep(1)
+
+                    # coil ended: one last poll, else MILL_RUNS keeps NOT_FOUND
+                    final_coil_id = coil_resolver.finish()
+                    logger.info(f"Coil end - {roll_num} - {final_coil_id}")
 
                mq_obj.publish("taloja/writer", {"light": 1}) 
                # if ironing_raised == 1:

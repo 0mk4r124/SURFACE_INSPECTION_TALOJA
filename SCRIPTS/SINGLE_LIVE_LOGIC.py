@@ -611,10 +611,35 @@ class Processor:
         return fps, gpu_ms
 
 
+def refresh_coil_id(job):
+    """TRIGGER updates MILL_RUNS.COIL_ID minutes after coil start (late sync).
+    Re-read it on a fresh connection (safe from any thread) and keep the job in step."""
+    conn = L.getDBconn()
+    if conn is None:
+        return
+    try:
+        cid = L.get_coil_id_from_millruns(conn, job.uid)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if cid and cid != job.coil_id:
+        logger.info(f"Coil ID updated for {job.uid}: {job.coil_id} -> {cid}")
+        with job.lock:
+            job.coil_id = cid
+            job.summary["coil_id"] = cid
+
+
 # =========================================================================
 # Finalize (same outputs as LOGIC.process_cycle / process_cycle_stream)
 # =========================================================================
 def finalize(job, proc, show_live):
+    try:
+        refresh_coil_id(job)
+    except Exception:
+        logger.error(f"refresh_coil_id failed for {job.uid}: {traceback.format_exc()}")
+
     with job.lock:
         results = sorted(job.results, key=lambda x: x.get("r", 0))
         summary = dict(job.summary)
@@ -717,6 +742,11 @@ class Service:
                 with self.state_lock:
                     job = self.live
                 if job is not None:
+                    # show the late coil ID on the dashboard once TRIGGER resolves it
+                    if (job.coil_id in ("", "NOT_FOUND")
+                            and time.time() - getattr(job, "coil_id_checked", 0) > 10):
+                        job.coil_id_checked = time.time()
+                        refresh_coil_id(job)
                     gap = time.time() - self.live_json_last
                     if gap > L.LIVE_JSON_INTERVAL or (job.defect_dirty and gap > L.LIVE_JSON_MIN_GAP):
                         with job.lock:
