@@ -7,12 +7,22 @@ Problem (from DB_COIL_ID_SYNC_LOG): the coil ID for a new coil reaches
 DB_COIL_ID_SYNC a few minutes AFTER the coil starts, so a single fetch at
 coil start returns either NOT FOUND or the PREVIOUS coil's ID.
 
-Rule implemented:
-  * From coil start until coil end, poll DB_COIL_ID_SYNC every POLL_SEC.
-  * NOT FOUND / empty  -> keep polling.
-  * Same as previous coil's ID -> new ID not arrived yet, keep polling.
-  * Different from previous coil's ID -> new coil ID: update DB, stop polling.
-  * Coil ends without a new ID -> coil stays NOT_FOUND.
+Capture is never delayed: TRIGGER starts capture with one cycle UID first, and
+this resolver polls DB_COIL_ID_SYNC every POLL_SEC for the whole coil.
+MILL_RUNS.COIL_ID starts as NOT_FOUND and is updated at most ONCE.
+
+Branch is decided by the FIRST fetch of the coil:
+
+  1. First fetch = NOT FOUND
+       keep fetching till coil end (NOT FOUND does not stop the loop)
+       any coil ID received   -> update DB once, stop fetching
+       NOT FOUND till the end -> stays NOT_FOUND
+
+  2. First fetch = a coil ID
+       not same as previous coil's ID -> new coil ID: update DB once, stop
+       same as previous coil's ID     -> keep fetching till coil end
+         new coil ID received                  -> update DB once, stop
+         same ID (or NOT FOUND) till the end   -> stays NOT_FOUND
 
 "Previous coil ID" is persisted in DEBUGS/TEMP_JSON/LAST_COIL_ID.json so it
 survives TRIGGER restarts by MANAGE.py.
@@ -91,6 +101,7 @@ class CoilIdResolver:
         self._last_poll = 0.0
         self._polls = 0
         self._t0 = 0.0
+        self.first_fetch = None
         self.prev_coil_id = self._load_prev()
 
     # ---------------- public API (called from TRIGGER.py) ----------------
@@ -107,6 +118,7 @@ class CoilIdResolver:
         self._last_poll = 0.0
         self._polls = 0
         self._t0 = time.time()
+        self.first_fetch = None   # "NOT_FOUND" or "COIL_ID", set by first successful fetch
         self.log.info(f"[COIL_ID] Polling {SYNC_TABLE} for {cycle_uid} "
                       f"(prev coil = {self.prev_coil_id}, every {self.poll_sec}s)")
         return self.tick()
@@ -128,11 +140,23 @@ class CoilIdResolver:
                            f"(poll {self._polls}): {e}")
             return self.coil_id
 
-        if cid is None or cid == self.prev_coil_id:
+        # Branch is decided once, by the first successful fetch of this coil
+        if self.first_fetch is None:
+            self.first_fetch = "NOT_FOUND" if cid is None else "COIL_ID"
+            self.log.info(f"[COIL_ID] {self.cycle_uid}: first fetch = "
+                          f"{cid if cid else 'NOT FOUND'} (prev coil = {self.prev_coil_id})")
+
+        if cid is None:
+            keep_fetching, state = True, "NOT FOUND"                      # both branches
+        elif self.first_fetch == "COIL_ID" and cid == self.prev_coil_id:
+            keep_fetching, state = True, f"same as previous coil {cid}"   # branch 2
+        else:
+            keep_fetching = False   # branch 1: any coil ID / branch 2: new coil ID
+
+        if keep_fetching:
             if self._polls % LOG_EVERY_N_POLLS == 1:
-                state = "NOT FOUND" if cid is None else f"still previous coil {cid}"
                 self.log.info(f"[COIL_ID] {self.cycle_uid}: {state} "
-                              f"after {now - self._t0:.0f}s, polling")
+                              f"after {now - self._t0:.0f}s, fetching")
             return self.coil_id
 
         # New coil ID - write to DB first; only stop polling if the write landed.

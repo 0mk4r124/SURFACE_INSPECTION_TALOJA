@@ -126,16 +126,17 @@ def main():
 
                if ((mill_run == 1) or (mill_run == '1')) and diameter > 570 and mill_speed > 150:
                     roll_num = f'ROLL_{datetime.now().strftime("%Y%m%d%H%M%S")}'
+                    # start capture FIRST with this cycle UID - coil ID never delays capture
+                    mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     conn = getDBconn()
-                    insert_mill_run(conn, roll_num)
-                    coil_id = coil_resolver.start(roll_num)   # first poll now; keeps polling in the loop below
+                    insert_mill_run(conn, roll_num)            # MILL_RUNS row with COIL_ID = NOT_FOUND
+                    coil_id = coil_resolver.start(roll_num)   # first fetch now; keeps fetching in the loop below
                     # if not (("LPHU" in coil_id) or ("LPML" in coil_id) or ("STCL" in coil_id) or ("STCS" in coil_id)): 
                     #      print(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS | mill_speed = {mill_speed} | width = {width}")    
                     #      if coil_id != last_coil_id: logger.debug(f"Ignoring trigger as coil_id is not valid: {coil_id} == LPHU/LPML/STCL/STCS")        
                     #      last_coil_id = coil_id
                     #      continue
                     last_coil_id = coil_id
-                    mq_obj.publish("taloja/capture", {"action": "start", "roll_num": roll_num})
                     print(f"Trigger recieved - {roll_num} - {coil_id} - {datetime.now()} | width = {width}")
                     logger.info(f"Trigger recieved - {roll_num} - {coil_id}")
                     time.sleep(2)
