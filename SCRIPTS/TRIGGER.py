@@ -163,7 +163,7 @@ def main():
                               # logger.info(f"diameter = {diameter} | mill_speed = {mill_speed} | eg_setpoint = {eg_setpoint} | width = {width} | length = {length}")
                               # logger.info(f"mill_run = {mill_run} | ironing_raised = {ironing_raised}")
                               break
-                         elif mill_speed < 1500:
+                         elif mill_speed < 100:
                               mq_obj.publish("taloja/capture", {"action": "stop", "roll_num": roll_num})
                               mq_obj.publish("taloja/writer", {"light": 1})
                               time.sleep(5)
