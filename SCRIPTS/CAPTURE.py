@@ -313,6 +313,16 @@ def process_capture(flir, mq_obj, logger):
                             os.makedirs(p, exist_ok=True)
                             save_paths[cs] = p
 
+                        # Drop frames buffered during idle (up to BUFFER_COUNT,
+                        # ~10 min old) so the coil's first saved frame is live.
+                        for cs in CAMERA_CONFIGS:
+                            try:
+                                n_stale = flir.flush_stream(cam_objects[cs])
+                                logger.info(f"Flushed {n_stale} stale buffered frames for camera {cs} "
+                                            f"before roll {roll_num}")
+                            except Exception:
+                                logger.error(f"flush_stream failed for camera {cs}: {traceback.format_exc()}")
+
                         # per-roll counters
                         loop_start = time.time()
                         with _stats_lock:
@@ -407,6 +417,8 @@ def process_capture(flir, mq_obj, logger):
                         comp_path = os.path.join(save_path, fname)
                         cam = cam_objects[cam_serial]
 
+                        # preview the CURRENT frame, not the oldest buffered one
+                        flir.flush_stream(cam)
                         img, err = flir.capture(cam)
                         if err:
                             # BUGFIX: was `if  [cam_serial] < MAX_RETRIES:`

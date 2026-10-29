@@ -102,6 +102,12 @@ DECODE_WORKERS   = int(os.environ.get("SINGLE_DECODE_WORKERS", "8"))
 POST_WORKERS     = int(os.environ.get("SINGLE_POST_WORKERS", "4"))
 TRASH_WORKERS    = int(os.environ.get("SINGLE_TRASH_WORKERS", "6"))
 TRASH_QUEUE_MAX  = int(os.environ.get("SINGLE_TRASH_QUEUE", "64"))   # x ~15 MB each
+# TRASH copy = hard link to the CAPTURE JPEG (same bytes, no re-encode, no
+# extra disk space) when SAVE_SCALE == 1. The old q100 3-channel re-encode was
+# ~1.8x larger than the capture file and added nothing (source is already q95).
+# Set TRASH_HARDLINK=0 to restore the re-encode. Falls back automatically if
+# RAW_IMG and TRASH are on different filesystems.
+TRASH_HARDLINK   = os.environ.get("TRASH_HARDLINK", "1") == "1"
 LIVE_SLICE_MAX   = int(os.environ.get("SINGLE_LIVE_SLICE", "256"))   # live frames per pass
 BACKLOG_SLICE    = int(os.environ.get("SINGLE_BACKLOG_SLICE", "64")) # backlog frames per pass
 FILE_SETTLE_SECS = float(os.environ.get("SINGLE_FILE_SETTLE", "1.0"))  # skip files younger than this (mid-write)
@@ -417,6 +423,28 @@ class Processor:
             finally:
                 self.trash_q.task_done()
 
+    def _link_trash(self, src, dst):
+        """Hard-link the capture file into TRASH. True on success; False means
+        the caller should use the old re-encode path."""
+        if not TRASH_HARDLINK or (L.SAVE_SCALE and L.SAVE_SCALE != 1.0):
+            return False
+        tmp = f"{dst}.lnk{threading.get_ident()}"
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.link(src, tmp)
+            os.replace(tmp, dst)            # atomic; overwrites like the old save did
+            return True
+        except OSError as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if not getattr(self, "_link_warned", False):
+                self._link_warned = True
+                logger.warning(f"TRASH hard link failed ({e}); falling back to re-encode. "
+                               f"src={src} dst={dst}")
+            return False
+
     def _queue_trash(self, img, path):
         try:
             self.trash_q.put_nowait((img, path))
@@ -445,7 +473,8 @@ class Processor:
                 comp_h, comp_w = img.shape[0], img.shape[1]
 
             save_path = os.path.join(L.TRASH_PATH, job.uid, cam, name)
-            self._queue_trash(img, save_path)
+            if not self._link_trash(os.path.join(cam_path, name), save_path):
+                self._queue_trash(img, save_path)
 
             defect_json = {
                 "r": rank, "d": diameter, "e": eg_setpoint, "l": distance,

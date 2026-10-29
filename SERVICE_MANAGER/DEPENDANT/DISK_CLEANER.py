@@ -51,7 +51,10 @@ CLEAN_DIRS = [
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def disk_percent() -> float:
-    return psutil.disk_usage("/").percent
+    # Measure the filesystem DEBUGS actually lives on (was hard-coded "/",
+    # which watches the wrong disk if DEBUGS is ever moved to a data drive).
+    debugs = os.path.join(BASE_FILE_PATH, "DEBUGS")
+    return psutil.disk_usage(debugs if os.path.isdir(debugs) else "/").percent
 
 
 def collect_images(paths: list[str]) -> list[tuple[float, str]]:

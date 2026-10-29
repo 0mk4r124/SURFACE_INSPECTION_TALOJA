@@ -496,6 +496,36 @@ class FlirCamera:
         except Exception as e:
             return None, None, f"capture_raw error: {e}\n{traceback.format_exc()}"
 
+    def flush_stream(self, cam, max_frames: int = 2000):
+        """
+        Discard every frame already queued in the Spinnaker stream buffer and
+        return how many were dropped.
+
+        WHY: the camera free-runs at FRAME_RATE from BeginAcquisition onward,
+        but the idle loop pulls only one frame every ~2 s. With OldestFirst and
+        BUFFER_COUNT=300, the buffer fills with stale frames within ~10 s, and
+        the FIRST 300 frames handed out after a START are old idle frames
+        (spread over the last ~10 min), not the coil. Flushing right before
+        recording makes the first saved frame the current one.
+
+        GetNextImage(1) returns immediately while buffers are queued and raises
+        on timeout once the queue is empty, i.e. once we are caught up with live.
+        """
+        if cam is None:
+            return 0
+        n = 0
+        for _ in range(max_frames):
+            try:
+                img = cam.GetNextImage(1)
+            except Exception:
+                break
+            try:
+                img.Release()
+            except Exception:
+                pass
+            n += 1
+        return n
+
     def convert_array(self, arr, pixel_format):
         """
         Demosaic / convert a raw array returned by capture_raw().
