@@ -18,7 +18,7 @@ const MAP_WIDTH_BIN_MM = 10;    // coil map: same-type defects within a 10 mm wi
 // coil map: per-type minimum confidence (%) to be shown. Types not listed show at any score.
 // Also used for every defect COUNT (live tiles, details modal, history table).
 // MUST match MAP_MIN_CONF in api/views.py (history table + CSV) - change both together.
-const MAP_MIN_CONF = { W: 95, O: 90, S: 90, D: 90 };
+const MAP_MIN_CONF = { W: 95, O: 90, S: 90, D: 95 };
 
 function passesMapConf(d) {
     const min = MAP_MIN_CONF[d.type];
