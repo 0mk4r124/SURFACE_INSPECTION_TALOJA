@@ -365,6 +365,57 @@ document.getElementById("defectDownloadBtn")?.addEventListener("click", (e) => {
     downloadDefectImage();
 });
 
+// ======================== RAW IMAGE DOWNLOAD (original file bytes, no box / no details) ========================
+// Fetches the same file openDefectImage() loads via /api/serve-file and saves it untouched
+// (no canvas -> no re-encode, no overlay).
+async function downloadRawDefectImage(btn) {
+    const point = (defectNavIndex >= 0) ? defectNavList[defectNavIndex] : null;
+
+    let url = "", srcPath = "";
+    if (point) {
+        srcPath = point.rawImg || point.img || point.image || point.image_url || "";
+        if (srcPath) url = "/api/serve-file?file=" + encodeURIComponent(srcPath);
+    } else {
+        // non-carousel open: modal src is the served file itself unless it was drawn on a canvas
+        const src = document.getElementById("imageModal")?.dataset.src || "";
+        if (src && !src.startsWith("blob:")) url = src;
+    }
+    if (!url) {
+        console.warn("raw download: no raw image path for current defect", point);
+        alert("Raw image path not available for this defect.");
+        return;
+    }
+
+    const safe = s => String(s ?? "").replace(/[^\w.-]+/g, "_");
+    const ext  = (srcPath.match(/\.[A-Za-z0-9]+$/) || [".jpg"])[0].toLowerCase();
+    const name = point
+        ? `${safe(defectNavCtx.coilId || "coil")}_F${safe(point.frame)}_RAW${ext}`
+        : `raw_${Date.now()}${ext}`;
+
+    if (btn) btn.disabled = true;
+    let objUrl = null;
+    try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        objUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objUrl; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+    } catch (err) {
+        console.error("raw download failed:", url, err);
+        alert("Raw image download failed: " + err.message);
+    } finally {
+        if (objUrl) setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+        if (btn) btn.disabled = false;
+    }
+}
+
+document.getElementById("defectRawDownloadBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    downloadRawDefectImage(e.currentTarget);
+});
+
 function setDefectNavUI(show) {
     const panel = document.getElementById("defectDetailsPanel");
     const prev  = document.getElementById("defectPrevBtn");
