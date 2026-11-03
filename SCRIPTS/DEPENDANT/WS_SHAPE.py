@@ -401,6 +401,7 @@ def draw_shape(img, shp, ok_color=(0, 255, 255), bad_color=(0, 0, 255)):
 # and, for a spot that passed every shape gate, rejects it as:
 #     OVERSIZE  area above WS_MAX_AREA_MM2           (why = "size")
 #     OIL_LIKE  score <= WS_SCORE_THRESHOLD            (why = "score")
+#     WIDE_FAINT min_mm >= WS_WIDE_MINOR_MM and Cin < WS_WIDE_CIN_MAX (why = "wide_faint")
 # Earlier shape rejects (OVERSTRETCHED / IRREGULAR / ASYMMETRIC / FAINT)
 # keep their own reason; their score is still recorded.
 # A spot with no contrast values (no frame passed) is NOT rejected by score.
@@ -419,6 +420,13 @@ WS_SCORE_REVIEW    = float(os.environ.get("WS_SCORE_REVIEW", "0.5"))
 # size gate: spots larger than this (mm^2) are rejected. 0 = off.
 # Set from a test coil with SCRIPTS/WS_SIZE_STATS.py.
 WS_MAX_AREA_MM2    = float(os.environ.get("WS_MAX_AREA_MM2", "0"))
+# wide-faint gate (wide oil smear): reject when the short side of the spot
+# (min_mm) is >= WS_WIDE_MINOR_MM AND the inner grey level Cin (ct[0]) is below
+# WS_WIDE_CIN_MAX. A large true spot with a bright core (Cin >= 12) still passes.
+# Cin is an absolute grey level, so like the C term it depends on camera
+# exposure / gain. WS_WIDE_MINOR_MM = 0 turns the gate off.
+WS_WIDE_MINOR_MM   = float(os.environ.get("WS_WIDE_MINOR_MM", "11.0"))
+WS_WIDE_CIN_MAX    = float(os.environ.get("WS_WIDE_CIN_MAX", "12.0"))
 
 _WS_CAP = 3.0
 _WS_FIT_RANGE = {"R": (1.03, 2.90), "S2": (0.83, 0.98), "E": (0.90, 0.98),
@@ -452,17 +460,39 @@ def ws_score(shp):
         return None
 
 
+def ws_wide_faint(shp):
+    """True when the spot is wide (short side min_mm >= WS_WIDE_MINOR_MM) and
+    faint (inner level Cin = ct[0] < WS_WIDE_CIN_MAX). False when the gate is
+    off or a value is missing - a missing field must never drop a real defect."""
+    try:
+        if WS_WIDE_MINOR_MM <= 0:
+            return False
+        ct, minor = shp.get("ct"), shp.get("min_mm")
+        if not ct or minor is None:
+            return False
+        minor, cin = float(minor), float(ct[0])
+        if not (math.isfinite(minor) and math.isfinite(cin)):
+            return False
+        return minor >= WS_WIDE_MINOR_MM and cin < WS_WIDE_CIN_MAX
+    except Exception:
+        print(f"ws_wide_faint failed: {traceback.format_exc()}")
+        return False
+
+
 def apply_ws_filter(shp):
-    """Score + size gate on a white-spot shape dict (in place). Safe on None."""
+    """Score + size + wide-faint gate on a white-spot shape dict (in place). Safe on None."""
     try:
         if not shp or shp.get("shape") == "UNKNOWN" or not WS_SCORE_ENABLED:
             return shp
         sc = ws_score(shp)
+        # wide-faint needs a complete panel, same as the score
+        wide_faint = sc is not None and ws_wide_faint(shp)
         if sc is not None:
             s, s_old, oor = sc
             shp["wss"] = round(s, 2)
             shp["wss_old"] = round(s_old, 2)
-            shp["rv"] = bool(abs(s - WS_SCORE_THRESHOLD) <= WS_SCORE_REVIEW or oor)
+            shp["rv"] = bool(abs(s - WS_SCORE_THRESHOLD) <= WS_SCORE_REVIEW or oor
+                             or (wide_faint and abs(float(shp["min_mm"]) - WS_WIDE_MINOR_MM) <= 0.5))
 
         if not shp.get("ok"):
             return shp                      # earlier reject keeps its reason
@@ -472,6 +502,8 @@ def apply_ws_filter(shp):
             shp.update(shape="OVERSIZE", ok=False, why="size")
         elif sc is not None and sc[0] <= WS_SCORE_THRESHOLD:
             shp.update(shape="OIL_LIKE", ok=False, why="score")
+        elif wide_faint:
+            shp.update(shape="WIDE_FAINT", ok=False, why="wide_faint")
     except Exception:
         print(f"apply_ws_filter failed: {traceback.format_exc()}")
     return shp
