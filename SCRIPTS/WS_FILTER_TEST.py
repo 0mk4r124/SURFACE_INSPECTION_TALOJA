@@ -44,6 +44,16 @@ Formulas (S > WS_THRESHOLD keeps White Spot, otherwise OIL_STAIN)
   settings of the training coils (EXPOSURE 350 / GAIN 17). R, S2, E, A are
   not affected by exposure. If exposure or gain changes, use WS_FORMULA = "old"
   until the new formula is refit.
+
+Wide-faint gate (same rule as production WS_SHAPE.apply_ws_filter)
+------------------------------------------------------------------
+  A spot that passes the score is still OIL_STAIN when its short side
+  (min_mm) >= WS_WIDE_MINOR_MM AND its inner level Cin < WS_WIDE_CIN_MAX
+  (a wide, faint oil smear). A large spot with a bright core still passes.
+  Only applied when the score could be computed. WS_WIDE_MINOR_MM = 0 = off.
+  CSV: wide_faint = 1 for every spot that is wide + faint, reject_by tells
+  which rule decided (score / wide_faint). Crops removed only by this gate
+  go to crops/WIDE_FAINT so they can be checked on their own.
 """
 
 # =========================================================================
@@ -57,6 +67,8 @@ TEST_COIL_ID  = None                   # None -> "TEST_" + original coil id (MIL
 WS_FORMULA    = "new"                  # "new" or "old"
 WS_THRESHOLD  = 0.0                    # S <= this -> OIL_STAIN. Lower it to keep more true spots (see CSV)
 REVIEW_BAND   = 0.5                    # |S - threshold| <= this -> flagged REVIEW in CSV / crops
+WS_WIDE_MINOR_MM = 11.0                # wide-faint gate: short side >= this (mm) ...   0 = gate off
+WS_WIDE_CIN_MAX  = 12.0                # ... AND inner level Cin < this -> OIL_STAIN
 
 REPLACE_EXISTING = True                # re-running the same TEST_ROLL_NUM overwrites its own row + JSON
 CREATE_TIME_MODE = "original"          # "original": original coil's CREATE_TIME + 1 s (keeps the test coil
@@ -75,12 +87,17 @@ import sys
 # Every white spot must reach the filter: keep the production shape gate in
 # "flag" mode for THIS process only (nothing dropped / converted before scoring).
 os.environ["WS_REJECT_MODE"] = "flag"
+# production WS_SHAPE (imported below) uses the same wide-faint limits as this
+# test, so the CSV "shape" column and this test's verdict follow one rule
+os.environ["WS_WIDE_MINOR_MM"] = str(WS_WIDE_MINOR_MM)
+os.environ["WS_WIDE_CIN_MAX"] = str(WS_WIDE_CIN_MAX)
 os.environ.setdefault("DEBUG_PARALLEL", "0")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import csv
 import json
+import math
 import time
 import traceback
 import threading
@@ -134,7 +151,8 @@ def ws_decide(shape):
     Missing panel values -> the detection is KEPT as White Spot (a missing
     field must never drop a real defect)."""
     out = {"v": "WHITE_SPOT", "used": WS_FORMULA, "s": None, "s_old": None,
-           "s_new": None, "review": False, "oor": [], "why": ""}
+           "s_new": None, "review": False, "oor": [], "why": "",
+           "wf": False, "by": ""}
     try:
         if not shape or shape.get("shape") == "UNKNOWN":
             out["why"] = "no_shape"
@@ -159,8 +177,25 @@ def ws_decide(shape):
 
         out.update(s=round(s, 3), s_old=round(s_old, 3), s_new=round(s_new, 3),
                    R=round(R, 3), C=round(C, 2), S2=S2, E=E, A=A, cin=cin, ring=ring)
-        out["v"] = "WHITE_SPOT" if s > WS_THRESHOLD else "OIL_STAIN"
-        out["review"] = abs(s - WS_THRESHOLD) <= REVIEW_BAND or bool(out["oor"])
+        # wide-faint: wide oil smear (short side >= limit) with a dim core
+        near_width = False
+        try:
+            minor = shape.get("min_mm")
+            minor = None if minor is None else float(minor)
+            if (WS_WIDE_MINOR_MM > 0 and minor is not None
+                    and math.isfinite(minor) and math.isfinite(cin)):
+                out["wf"] = minor >= WS_WIDE_MINOR_MM and cin < WS_WIDE_CIN_MAX
+                near_width = out["wf"] and abs(minor - WS_WIDE_MINOR_MM) <= 0.5
+        except (TypeError, ValueError):
+            out["wf"] = False                     # bad value: never drop on it
+
+        if s <= WS_THRESHOLD:
+            out["v"], out["by"] = "OIL_STAIN", "score"
+        elif out["wf"]:
+            out["v"], out["by"] = "OIL_STAIN", "wide_faint"
+        else:
+            out["v"] = "WHITE_SPOT"
+        out["review"] = abs(s - WS_THRESHOLD) <= REVIEW_BAND or bool(out["oor"]) or near_width
         return out
     except Exception:
         log.error(f"ws_decide failed: {traceback.format_exc()}")
@@ -267,6 +302,9 @@ def main():
         fail(f"CYCLE_UID looks wrong: {CYCLE_UID!r} (expected ROLL_YYYYMMDDHHMMSS)")
     if WS_FORMULA not in ("new", "old"):
         fail(f"WS_FORMULA must be 'new' or 'old', got {WS_FORMULA!r}")
+    if WS_WIDE_MINOR_MM < 0 or WS_WIDE_CIN_MAX < 0:
+        fail(f"WS_WIDE_MINOR_MM / WS_WIDE_CIN_MAX must be >= 0 "
+             f"(got {WS_WIDE_MINOR_MM} / {WS_WIDE_CIN_MAX}); use WS_WIDE_MINOR_MM = 0 to turn the gate off")
 
     TEST_ROLL_NUM = TEST_ROLL_NUM or f"TEST_{CYCLE_UID}"
     if not TEST_ROLL_NUM.startswith("TEST_"):
@@ -323,6 +361,8 @@ def main():
            f"  frames in TRASH: {n_total} ({', '.join(f'{c}:{len(v)}' for c, v in frames.items())})"
            f"{'' if not MAX_FRAMES else f' | limited to first {MAX_FRAMES}'}\n"
            f"  formula: {WS_FORMULA} | threshold {WS_THRESHOLD} | review band +/-{REVIEW_BAND}\n"
+           f"  wide-faint: "
+           f"{'off' if WS_WIDE_MINOR_MM <= 0 else f'short side >= {WS_WIDE_MINOR_MM} mm and Cin < {WS_WIDE_CIN_MAX}'}\n"
            f"  output : {out_dir}")
     print(hdr, flush=True)
     log.info(hdr.replace("\n", " |"))
@@ -364,7 +404,8 @@ def main():
                 if SAVE_CROPS:
                     try:
                         x1, x2, y1, y2 = it["b"]
-                        sub = "REVIEW" if d["review"] else d["v"]
+                        sub = ("REVIEW" if d["review"] else
+                               "WIDE_FAINT" if d["by"] == "wide_faint" else d["v"])
                         crop_path = os.path.join(crop_dir, sub, f"{os.path.splitext(name)[0]}_{i}.jpg")
                         os.makedirs(os.path.dirname(crop_path), exist_ok=True)
                         cv2.imwrite(crop_path, img[y1:y2, x1:x2], [int(cv2.IMWRITE_JPEG_QUALITY), 95])
@@ -383,7 +424,8 @@ def main():
                     "A": shp.get("ar"), "tilt": shp.get("tilt"),
                     "maj_mm": shp.get("maj_mm"), "min_mm": shp.get("min_mm"), "a_mm2": shp.get("a_mm2"),
                     "s_old": d["s_old"], "s_new": d["s_new"], "used": d["used"], "score": d["s"],
-                    "verdict": d["v"], "review": int(d["review"]), "out_of_range": ";".join(d["oor"]),
+                    "verdict": d["v"], "reject_by": d["by"], "wide_faint": int(d["wf"]),
+                    "review": int(d["review"]), "out_of_range": ";".join(d["oor"]),
                     "missing": d["why"],
                     "old_says": ("" if d["s_old"] is None else
                                  ("WHITE_SPOT" if d["s_old"] > WS_THRESHOLD else "OIL_STAIN")),
@@ -444,6 +486,10 @@ def main():
                         st["to_oil"] += 1
                         st["to_oil_vis_as_O"] += r["on_map_after"]
                         st["to_oil_was_vis_W"] += r["on_map_before"]
+                        if r["reject_by"] == "wide_faint":
+                            st["to_oil_wide"] += 1
+                            st["to_oil_wide_was_vis_W"] += r["on_map_before"]
+                    st["wide_faint"] += r["wide_faint"]
                     st["review"] += r["review"]
                     st["oor"] += int(bool(r["out_of_range"]))
                     st["missing"] += int(bool(r["missing"]))
@@ -532,7 +578,8 @@ def main():
         json.dump({"cycle_uid": TEST_ROLL_NUM, "coil_id": TEST_COIL_ID,
                    "source_cycle_uid": CYCLE_UID, "source_coil_id": orig_coil,
                    "ws_filter": {"formula": WS_FORMULA, "threshold": WS_THRESHOLD,
-                                 "review_band": REVIEW_BAND},
+                                 "review_band": REVIEW_BAND,
+                                 "wide_minor_mm": WS_WIDE_MINOR_MM, "wide_cin_max": WS_WIDE_CIN_MAX},
                    "result": results}, f)
     os.replace(tmp, json_path)
 
@@ -555,8 +602,9 @@ def main():
 
     details = dict(summary)
     details["ws_test"] = {"source": CYCLE_UID, "formula": WS_FORMULA, "thr": WS_THRESHOLD,
+                          "wide": [WS_WIDE_MINOR_MM, WS_WIDE_CIN_MAX],
                           "w_in": st["w_in"], "kept": st["w_kept"], "to_oil": st["to_oil"],
-                          "review": st["review"]}
+                          "to_oil_wide": st["to_oil_wide"], "review": st["review"]}
     details_txt = json.dumps(details)
     if len(details_txt) > 3000:                          # DEFECT_DETAILS max_length
         details.pop("ws_test", None)
@@ -596,6 +644,10 @@ def main():
         f"  kept WHITE_SPOT    : {st['w_kept']} (on map: {st['w_kept_vis']})\n"
         f"  -> OIL_STAIN       : {st['to_oil']} (were on map as W: {st['to_oil_was_vis_W']}, "
         f"now on map as O at conf>={MAP_MIN_CONF['O']}%: {st['to_oil_vis_as_O']})\n"
+        f"     by score        : {st['to_oil'] - st['to_oil_wide']}\n"
+        f"     by wide-faint   : {st['to_oil_wide']} (passed the score; were on map as W: "
+        f"{st['to_oil_wide_was_vis_W']}) -> crops/WIDE_FAINT\n"
+        f"  wide + faint total : {st['wide_faint']} (incl. spots the score already rejected)\n"
         f"  flagged REVIEW     : {st['review']} (score within +/-{REVIEW_BAND} or input outside the fitted range: {st['oor']})\n"
         f"  kept, no panel data: {st['missing']}\n"
         f"  old vs new formula disagree on {st['old_new_disagree']} spots (see old_says / new_says in the CSV)\n"
